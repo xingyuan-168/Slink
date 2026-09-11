@@ -1,0 +1,50 @@
+#pragma once
+#include "model.h"
+#include <condition_variable>
+#include <thread>
+
+namespace gwm {
+extern HINSTANCE module;
+class Engine {
+public:
+    Engine(Config,int,int,int,int);
+    ~Engine();
+    int start();
+    void stop();
+    bool stopped() const {return stopRequested.load();}
+    int mutate(const std::function<int(Config&)>&);
+    Config snapshot();
+    HWND window() const {return hwnd.load();}
+    int canvasState() const {return state.load();}
+    uint32_t presented() const {return presentedFrames.load();}
+    uint32_t elapsed() const {return static_cast<uint32_t>(nowMs()-startedAt);}
+    uint64_t nextGeneration() {return ++generation;}
+#ifdef GWM_TEST_HOOKS
+    void injectDeviceLoss() {injectedFailures=1;}
+#endif
+    void activate(int,int);
+    static LRESULT CALLBACK wndProc(HWND,UINT,WPARAM,LPARAM) noexcept;
+private:
+#ifdef GWM_TEST_HOOKS
+    std::atomic<int> injectedFailures{0};
+#endif
+    void uiMain() noexcept;
+    void renderMain() noexcept;
+    void requestStop() noexcept;
+    std::mutex configMutex;
+    Config config;
+    std::vector<Hit> hits;
+    std::atomic<uint64_t> generation{0};
+    std::atomic<uint32_t> presentedFrames{0};
+    uint64_t startedAt=nowMs();
+    std::atomic<HWND> hwnd{nullptr};
+    std::atomic<bool> stopRequested{false};
+    std::atomic<int> state{GWM_STARTING};
+    std::thread uiThread,renderThread;
+    std::mutex wakeMutex;
+    std::condition_variable wake;
+    bool uiReady=false,renderReady=false;
+    int startupError=GWM_OK;
+    int x,y,initialWidth,initialHeight;
+};
+}

@@ -7,12 +7,12 @@ Windows 10 1903+、Windows 11，C++20 / MSVC / CMake / x86 / 静态 CRT；每宿
 ## 组件
 
 - DLLExport：参数校验、复制输入、串行提交更新、状态快照；C++异常不得跨越 C ABI。
-- SlotManager：以有序槽位数组保存 HWND 和配置；不排序、不去重、不自动补空。每次替换生成槽位代次，旧回调不得覆盖新 HWND 状态。
-- Capture：WGC CreateForWindow 和 CreateFreeThreaded；有限帧缓存和最新帧策略。重复 HWND 可以共享底层会话，显示配置仍独立。
+- SlotManager：以有序槽位数组保存 HWND 和配置；不排序、不去重、不自动补空。每次替换生成槽位代次，旧渲染快照不得覆盖新 HWND 状态。
+- Capture：WGC CreateForWindow 和 CreateFreeThreaded；有限帧缓存和最新帧策略。每槽位独立捕获会话，重复 HWND 的显示配置与生命周期互不干扰。
 - Renderer：D3D11 裁剪/缩放合成；共享 immediate context 的访问串行化。D2D/DirectWrite 绘制标题、边框及状态，WIC只在图片变更时解码。
 - Layout：生成统一矩形快照用于渲染和命中，不使用两套取整算法。边界采用半开区间，尾行尾列覆盖剩余像素。
 - Canvas：自有 UI 线程消息循环，图标、缩放、DPI、关闭和双击；渲染线程提交呈现。
-- Resources：管理设备、纹理、帧池、事件、图标、窗口与线程，显式停止时逆序释放。
+- Resources：管理设备、纹理、帧池、图标、窗口与线程，显式停止时逆序释放。
 
 ## 数据流
 
@@ -24,10 +24,24 @@ Windows 10 1903+、Windows 11，C++20 / MSVC / CMake / x86 / 静态 CRT；每宿
 
 - DllMain 仅保存模块句柄等常量，不初始化 COM/图形、不开消息循环、不等待线程。
 - 启动建立画布和工作线程后返回，不等待第一帧；重复启动返回已启动。
-- API修改按照请求进入顺序生效；整体替换原子发布。UI不持有接口互斥锁等待渲染，停止不得与回调形成锁环。
+- API修改按取得接口锁并提交配置的顺序生效；整体替换原子发布。UI不持有接口互斥锁等待渲染，停止不得与回调形成锁环。
 - 只在线程级设置 DPI 感知，避免修改易语言宿主全局策略。
-- 停止先拒绝新操作，撤销帧回调、关闭会话、排空在途工作，再销毁图形和窗口；调用方必须 Stop 返回后才 FreeLibrary。
+- 停止先拒绝新操作，关闭帧池与会话、结束渲染工作，再销毁图形和窗口；调用方必须 Stop 返回后才 FreeLibrary。
 - 用户关闭画布异步触发相同停止路径；重复 Stop 成功。会话退出后可再次启动。
 - 初帧等待、最小化、明确错误、失效分别显示状态；无新帧保留末帧，单独记录帧龄。真实全黑内容仍是有效帧。
 - 设备丢失进入重建设备状态，撤销旧代次资源后尝试重建；失败保持可查询错误和可关闭画布，不回退到桌面截图。
 - HWND失效后不自动绑定复用的句柄：已观察到关闭即保持失效，需调用方 SetWindow/ReplaceWindows 显式重新绑定。
+
+## 实际线程与帧交接
+
+`exports.cpp` 管理 ABI 和进程内引擎；`model.h` 保存有序槽位与布局；`engine.cpp` 管理 UI/渲染线程及事务；`capture.cpp` 负责 WGC；`graphics.cpp` 负责 D3D/D2D/WIC。
+
+渲染线程初始化 MTA，创建 CreateFreeThreaded 帧池（2 个缓冲），每次轮询最多取 2 帧，将最新纹理复制至 GPU 自有纹理。没有 FrameArrived / Closed 的 DLL 回调，停止时不必等待外部线程回到 DLL 代码。所有 immediate context、D2D 及捕获资源仅在该线程访问；不做每帧 CPU 像素拷贝。
+
+设备健康检查也在画布最小化时执行。设备级 HRESULT 传递到外层，重建图形设备、帧池与图片缓存；临时显示 RECOVERING。成功后错误清零，计数增量累计。测试构建 GameWindowMapper_test.dll 含故障注入导出，正式 DLL 和交付包均不含该导出。
+
+源标题读取使用系统缓存的 InternalGetWindowText，避免同进程源窗口 UI 线程调用 WM_Stop 时，与跨线程同步 WM_GETTEXT 形成等待环。自定义标题无需读取源窗口。
+
+客户区与 WGC 纹理原点通过 GetClientRect、ClientToScreen、DWM 扩展边界和实际纹理尺寸匹配。调整尺寸时旧帧池的部分帧跳过，旧纹理与旧几何成对保留，直至新尺寸完整帧到达。ROI 超出客户区的部分保留纯色，完整请求 ROI 的宽高比决定布局。
+
+图形循环按 15/30/60 FPS 设置限制提交节奏；WGC 实际交付与显示合成受到系统、源窗口、显卡和显示会话影响，实际速率由诊断计数测量。标题按画布 DPI 换算物理字体尺寸；源 ROI 始终为物理像素。

@@ -2,7 +2,7 @@
 
 ## 接口
 
-状态：实施规格，尚无可加载 DLL。requirement_id: REQ-GWM-001。
+状态：已实现 x86 Release DLL。requirement_id: REQ-GWM-001。
 
 所有函数 `extern "C" __stdcall`，使用 .def 固定未修饰 WM_ 导出名。返回 int32_t 状态码（0成功），输出值使用指针；HWND作为uint32_t位模式传递。索引均从1开始，无C++对象、STL或bool跨边界。
 
@@ -23,6 +23,7 @@
 | WM_GetCanvasWindow | outHwnd | 输出画布HWND；未运行时返回未启动 |
 | WM_GetCanvasStatus | outState,outCount,outRows,outCols | 固定32位输出 |
 | WM_GetSlotStatus | slot,outHwnd,outState,outError,outFrameAgeMs | 帧龄使用32位毫秒饱和值，未收帧为0xFFFFFFFF；状态按槽位查询 |
+| WM_GetFrameCounters | slot,outCaptured,outPresented,outElapsedMs | slot=0仅画布；32位累计计数，用两次采样差值计算速率 |
 | WM_GetLastErrorTextW | buffer,capacity,outRequired | 当前调用线程最近接口错误；容量含终止符，先查询长度再读取 |
 | WM_Stop | 无 | 阻止新工作、撤销捕获并释放资源；重复调用成功，返回后允许卸载 |
 
@@ -46,4 +47,17 @@
 
 x86 DLL只能由x86宿主加载；捕获源可为x86/x64顶层窗口。CP936无法表示的标题使用W接口。无旧DLL二进制兼容承诺。
 
-DLL不会修改宿主EXE资源；进程图标由易语言编译设置，画布标题栏图标由DLL资源设置。各导出函数的易语言声明在实现后与dumpbin结果一起验证，不能将此表当作已完成联调证据。
+DLL不会修改宿主EXE资源；进程图标由易语言编译设置，画布标题栏图标由DLL资源设置。易语言声明与公开头文件同步；原生测试逐个 GetProcAddress 解析固定导出名。易语言运行时接入仍由用户验收。
+
+## 上限与诊断细节
+
+- 网格最多 64 格；画布初始客户区边长最多 16384 像素。ROI 的 x/y 非负、宽高为正，坐标与宽高之和不得超过 INT32_MAX。
+- 标题最多 4096 个 UTF-16 代码单元；CP936 输入最多 16384 字节，解码后同样限 4096 单元。传零长度清除自定义标题。
+- 图片输入最多 32 MiB，解码后边长最多 4096；仅 BMP/PNG。失败保留旧底图。slot=0 清除全局底图后恢复纯色。
+- `WM_GetLastErrorTextW` 的 capacity 和 outRequired 均包含 UTF-16 终止符；空缓冲区查询返回 BUFFER_TOO_SMALL，不覆盖被查询的错误。
+- `WM_GetCanvasStatus` 在尚未启动或 Stop 后返回成功及 STOPPED；Stop 后其他窗口/槽位查询返回 NOT_STARTED。
+- `WM_GetSlotStatus` 的 frameAge 统计最近实际 WGC 交付时间，未收帧为 0xFFFFFFFF（易语言整数型显示 -1）。静止画面不会自动触发失败。
+- `WM_GetFrameCounters` 收帧计数是 WGC 交付数量，不代表不同画面的数量；呈现计数是成功的 Present 提交，不代表物理显示器刷新。采用无符号 32 位差值计算，计数及 elapsedMs 均会回绕；同一槽位重绑、数组替换、新一次启动会重置相应计数。设备恢复保持累计计数。
+- 多线程调用按实际取得接口锁并提交配置的顺序串行生效；并发调用不承诺按线程发起时间排序。查询返回一致配置快照，帧计数更新发生在渲染轮结束。
+- 捕获创建失败保留该槽位错误；调用 SetWindow 或 ReplaceWindows 显式重试。捕获设备失效由渲染线程重建，最多连续尝试 3 次。系统禁止捕获时不退回桌面截图。
+- 所有指针必须在函数调用期间有效并具有声明长度；不接受伪造地址。DLL不保存调用方内存指针，不回调宿主，不改变宿主窗口或进程图标。

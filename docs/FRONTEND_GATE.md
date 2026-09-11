@@ -1,10 +1,8 @@
 # Frontend Gate — REQ-GWM-001
 
 scope: gwm-wall-v1
-status: pending
+status: approved
 
-本次原型及UI_SPEC已建立，用户尚未批准。方案确认不替代原型确认，不继承旧提交的审批。
+2026-09-11 用户明确表示“原型批准.执行开发”。approval_record 已记录 APPROVAL-20260911081646070350，Frontend Gate 返回 allowed=true。本次批准针对当前 PROTOTYPE.html / UI_SPEC.md，不沿用历史批准。
 
-审阅内容：固定横向网格、顶部标题和编号、LOGO、等比ROI、无画面状态、双击激活、缩放行为。右侧参数区和模拟反馈只属于原型。
-
-下一步：展示本次原型，取得明确批准或修改意见。批准后调用approval_record，记录scope= gwm-wall-v1，再运行frontend gate；不得预先写入approved状态。
+批准范围：固定横向网格、顶部标题和编号、原始 LOGO、等比 ROI、无画面状态、双击激活、缩放行为。右侧参数区和模拟反馈只属于原型审阅工具，原生画布不附加该参数面板。

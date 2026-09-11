@@ -32,7 +32,7 @@ HWND window(uint32_t value) { return reinterpret_cast<HWND>(static_cast<uintptr_
     X(WM_AddWindow) X(WM_SetRegion) X(WM_SetLayout) X(WM_SetTitleA) X(WM_SetTitleW) \
     X(WM_SetBackground) X(WM_SetForceBackground) X(WM_SetFrameRate) \
     X(WM_GetCanvasWindow) X(WM_GetCanvasStatus) X(WM_GetSlotStatus) \
-    X(WM_GetLastErrorTextW) X(WM_Stop)
+    X(WM_GetLastErrorTextW) X(WM_GetFrameCounters) X(WM_Stop)
 struct Api {
     HMODULE module = nullptr;
 #define FIELD(name) decltype(&::name) name = nullptr;
@@ -131,6 +131,9 @@ void performance(Api& api, int count, int seconds, int fps) {
     const auto begin = GetTickCount64();
     const auto end = begin + static_cast<uint64_t>(seconds) * 1000;
     std::vector<uint64_t> live(count), fresh(count), samples(count);
+    std::vector<uint32_t> capturedBefore(count);
+    uint32_t presentedBefore=0, counterElapsed=0;
+    for(int i=0;i<count;++i) require(api.WM_GetFrameCounters(i+1,&capturedBefore[i],&presentedBefore,&counterElapsed)==GWM_OK,"frame_counter_query");
     auto nextReport = begin + 5000;
     while (GetTickCount64() < end) {
         for (int i = 0; i < count; ++i) {
@@ -149,13 +152,16 @@ void performance(Api& api, int count, int seconds, int fps) {
     const auto after = metrics(); const auto elapsed = GetTickCount64() - begin;
     SYSTEM_INFO info{}; GetSystemInfo(&info);
     const double cpu = elapsed ? (after.cpu100ns - before.cpu100ns) / (elapsed * 10000.0) * 100.0 / info.dwNumberOfProcessors : 0;
-    std::printf("{\"performance\":true,\"windows\":%d,\"requested_fps\":%d,\"elapsed_ms\":%llu,\"host_cpu_percent_total_machine\":%.3f,\"private_bytes_start\":%llu,\"private_bytes_end\":%llu,\"handles_start\":%lu,\"handles_end\":%lu,\"gpu_usage\":null,\"vram_bytes\":null,\"capture_fps\":null,\"presentation_fps\":null,\"note\":\"fresh samples are observations, not unique frame counts; source process CPU is excluded\"}\n",
+    uint32_t captured=0,presented=0;
+    require(api.WM_GetFrameCounters(0,&captured,&presented,&counterElapsed)==GWM_OK,"canvas_counter_query");
+    std::printf("{\"performance\":true,\"windows\":%d,\"requested_fps\":%d,\"elapsed_ms\":%llu,\"host_cpu_percent_total_machine\":%.3f,\"private_bytes_start\":%llu,\"private_bytes_end\":%llu,\"handles_start\":%lu,\"handles_end\":%lu,\"gpu_usage\":null,\"vram_bytes\":null,\"presentation_submit_fps\":%.3f,\"note\":\"WGC deliveries and successful Present submissions; source process CPU is excluded\"}\n",
         count, fps, static_cast<unsigned long long>(elapsed), cpu,
         static_cast<unsigned long long>(before.privateBytes), static_cast<unsigned long long>(after.privateBytes),
-        static_cast<unsigned long>(before.handles), static_cast<unsigned long>(after.handles));
+        static_cast<unsigned long>(before.handles), static_cast<unsigned long>(after.handles), uint32_t(presented-presentedBefore)*1000.0/elapsed);
     for (int i = 0; i < count; ++i) {
-        std::printf("{\"slot\":%d,\"samples\":%llu,\"live_samples\":%llu,\"fresh_age_le_250ms_samples\":%llu}\n",
-            i + 1, static_cast<unsigned long long>(samples[i]), static_cast<unsigned long long>(live[i]), static_cast<unsigned long long>(fresh[i]));
+        require(api.WM_GetFrameCounters(i+1,&captured,&presented,&counterElapsed)==GWM_OK,"slot_counter_query");
+        std::printf("{\"slot\":%d,\"samples\":%llu,\"live_samples\":%llu,\"fresh_age_le_250ms_samples\":%llu,\"wgc_delivery_fps\":%.3f}\n",
+            i + 1, static_cast<unsigned long long>(samples[i]), static_cast<unsigned long long>(live[i]), static_cast<unsigned long long>(fresh[i]),uint32_t(captured-capturedBefore[i])*1000.0/elapsed);
         check(fresh[i] > 0, "slot_received_fresh_frame_during_measurement");
     }
 }
@@ -173,10 +179,24 @@ void functional(Api& api, std::vector<Child>& children, const std::filesystem::p
     check(awaitState(api, 4, GWM_LIVE), "duplicate_source_reaches_live");
     int32_t state = 0, count = 0, rows = 0, cols = 0;
     check(api.WM_GetCanvasStatus(&state, &count, &rows, &cols) == GWM_OK && state == GWM_RUNNING && count == 4 && rows == 2 && cols == 2, "canvas_status_matches_layout");
+    using Inject = int32_t(GWM_CALL*)();
+    if(auto inject=reinterpret_cast<Inject>(GetProcAddress(api.module,"_WM_TestInjectDeviceLoss@0"))){
+        uint32_t canvas=0,before=0,after=0,presented=0,elapsed=0;
+        require(api.WM_GetCanvasWindow(&canvas)==GWM_OK,"recovery_canvas_handle");
+        require(api.WM_GetFrameCounters(1,&before,&presented,&elapsed)==GWM_OK,"recovery_counter_before");
+        ShowWindow(window(canvas),SW_MINIMIZE);
+        require(inject()==GWM_OK,"inject_device_removed_while_canvas_minimized");
+        require(awaitState(api,1,GWM_RECOVERING),"device_loss_publishes_recovering");
+        require(awaitState(api,1,GWM_LIVE),"device_recovers_while_canvas_minimized");
+        require(api.WM_GetFrameCounters(1,&after,&presented,&elapsed)==GWM_OK&&after>=before,"device_recovery_counter_monotonic");
+        check(status(api,1).error==GWM_OK,"device_recovery_clears_error");
+        ShowWindow(window(canvas),SW_RESTORE);
+    }
     check(api.WM_SetLayout(1, 3) == GWM_CAPACITY_EXCEEDED, "layout_cannot_truncate_slots");
     check(api.WM_SetRegion(0, 0, 0, 10, 10) == GWM_SLOT_OUT_OF_RANGE, "slot_numbers_start_at_one");
     check(api.WM_SetRegion(1, 0, 0, -1, 10) == GWM_INVALID_ARGUMENT, "reject_negative_region_width");
-    check(api.WM_SetRegion(1, -50, -50, 800, 600) == GWM_OK, "partially_outside_region_accepted");
+    check(api.WM_SetRegion(1, -50, -50, 800, 600) == GWM_INVALID_ARGUMENT, "reject_negative_region_origin");
+    check(api.WM_SetRegion(1, 500, 400, 800, 600) == GWM_OK, "partially_outside_region_accepted");
     check(api.WM_SetRegion(4, 50, 50, 300, 200) == GWM_OK, "duplicate_has_independent_region");
     const wchar_t chinese[] = L"中文标题：测试";
     check(api.WM_SetTitleW(1, chinese, static_cast<int32_t>(wcslen(chinese))) == GWM_OK, "utf16_title");
@@ -248,10 +268,12 @@ int wmain(int argc, wchar_t** argv) {
     auto dll = directory / L"GameWindowMapper.dll";
     auto source = directory / L"dynamic_source.exe";
     int count = 4, cycles = 100, seconds = 5, fps = 30;
-    bool allD3d = false, allGdi = false;
+    bool allD3d = false, allGdi = false, performanceOnly=false, requireHook=false;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--smoke") { cycles = 3; seconds = 2; }
+        else if(arg==L"--performance-only") performanceOnly=true;
+        else if(arg==L"--require-device-hook") requireHook=true;
         else if (arg == L"--windows" && i + 1 < argc) count = _wtoi(argv[++i]);
         else if (arg == L"--cycles" && i + 1 < argc) cycles = _wtoi(argv[++i]);
         else if (arg == L"--stress-seconds" && i + 1 < argc) seconds = _wtoi(argv[++i]);
@@ -264,9 +286,14 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (sizeof(void*) != 4 || count < 1 || count > 64 || cycles < 0 || seconds < 1 || (fps != 15 && fps != 30 && fps != 60) || (allGdi && allD3d)) return 2;
     try {
-        std::vector<Child> children; children.reserve(std::max(2, count));
-        for (int i = 0; i < std::max(2, count); ++i) children.push_back(launch(source, i, allD3d || (!allGdi && i % 2 != 0)));
-        { Api api(dll); functional(api, children, source); }
+        if(performanceOnly)cycles=0;
+        const int sourceCount=std::max(performanceOnly?1:2,count);
+        std::vector<Child> children; children.reserve(sourceCount);
+        for (int i = 0; i < sourceCount; ++i) children.push_back(launch(source, i, allD3d || (!allGdi && i % 2 != 0)));
+        if(!performanceOnly){ Api api(dll);
+            if(requireHook)require(GetProcAddress(api.module,"_WM_TestInjectDeviceLoss@0")!=nullptr,"required_device_test_hook_export");
+            functional(api, children, source);
+        }
         const auto initial = metrics();
         for (int cycle = 0; cycle < cycles; ++cycle) {
             Api api(dll);

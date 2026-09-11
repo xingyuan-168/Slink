@@ -46,4 +46,6 @@ reason: 自建轻量 DLL，参考公开 API 的生命周期与设计，不复制
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow — 前台激活受系统限制。
 - https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-seticon — 窗口大小图标。
 
-本次规划已阅读上述项目说明、许可证与接口文档。正式捕获实现前须阅读对应模块源码并锁定引用版本；复用代码时保留其许可证声明。
+本次已阅读项目说明、许可证、接口文档以及 Win32CaptureSample 的 SimpleCapture.cpp/.h 和 CropAndLock 的 ThumbnailCropAndLockWindow.cpp。2026-09-11 核验 HEAD：Win32CaptureSample `49fefe79fd9b11025f0b5eb91783a98888516070`；PowerToys `bb656da414e09808f6d25c98dca4313e7e37f828`。仅参考 API 与生命周期设计，未复制项目代码、未引入这些项目的二进制或源代码依赖。
+
+实施选择：自建线程和槽位管理，采用自由线程帧池轮询及有界 GPU 纹理交接；不继承样例的应用框架或 PowerToys 的 reparent 行为。

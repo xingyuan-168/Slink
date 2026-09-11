@@ -2,8 +2,8 @@
 
 requirement_id: REQ-GWM-001
 frontend_scope: gwm-wall-v1
-approval_status: pending
-approved_by: null
+approval_status: approved
+approved_by: user
 
 ## 审批范围
 

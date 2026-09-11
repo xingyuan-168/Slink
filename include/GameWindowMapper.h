@@ -57,6 +57,10 @@ GWM_API int32_t GWM_CALL WM_SetFrameRate(int32_t fps);
 GWM_API int32_t GWM_CALL WM_GetCanvasWindow(uint32_t* outHwnd);
 GWM_API int32_t GWM_CALL WM_GetCanvasStatus(int32_t* outState,int32_t* outCount,int32_t* outRows,int32_t* outCols);
 GWM_API int32_t GWM_CALL WM_GetSlotStatus(int32_t slot,uint32_t* outHwnd,int32_t* outState,int32_t* outError,uint32_t* outFrameAgeMs);
+/* Diagnostic counters, modulo 2^32. slot=0 returns canvas counters only.
+   Captured counts WGC deliveries, not necessarily changed image contents.
+   Presented counts successful Present submissions, not physical display refresh. */
+GWM_API int32_t GWM_CALL WM_GetFrameCounters(int32_t slot,uint32_t* outCaptured,uint32_t* outPresented,uint32_t* outElapsedMs);
 GWM_API int32_t GWM_CALL WM_GetLastErrorTextW(wchar_t* buffer,int32_t capacity,int32_t* outRequired);
 GWM_API int32_t GWM_CALL WM_Stop(void);
 
