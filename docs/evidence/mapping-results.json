@@ -1,0 +1,42 @@
+[
+  {
+    "exitCode": 9,
+    "case": "dwm-d3d-right",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge right "
+  },
+  {
+    "exitCode": 9,
+    "case": "dwm-d3d-left",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge left "
+  },
+  {
+    "exitCode": 9,
+    "case": "dwm-d3d-top",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge top "
+  },
+  {
+    "exitCode": 9,
+    "case": "dwm-d3d-bottom",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge bottom "
+  },
+  {
+    "exitCode": 9,
+    "case": "wgc-d3d-right",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge right --wgc"
+  },
+  {
+    "exitCode": 9,
+    "case": "wgc-d3d-left",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge left --wgc"
+  },
+  {
+    "exitCode": 9,
+    "case": "wgc-d3d-top",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge top --wgc"
+  },
+  {
+    "exitCode": 9,
+    "case": "wgc-d3d-bottom",
+    "arguments": "--backend d3d --cycles 1 --seconds 2 --edge bottom --wgc"
+  }
+]

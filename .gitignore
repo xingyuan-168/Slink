@@ -1,0 +1,9 @@
+/.tools/
+/.codex-os/
+/out/
+/build/
+/dist/
+/.vs/
+*.user
+*.log
+__pycache__/

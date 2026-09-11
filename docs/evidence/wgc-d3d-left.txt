@@ -1,0 +1,8 @@
+baseline outer=30,30,1936x1119 client=1920x1080 style=14cf0000 exStyle=100 dpi=96 showCmd=1
+backend=d3d maximized=0 client=1920x1080 dpi=96
+visible_occluded: valid_samples=22 frame_changes=21 last_frame=61 fixture_timer=62 fixture_paint=62 present_hr=0 wgc_frames=61
+park_position=-2000,64 geometry_only=0
+parked: valid_samples=23 frame_changes=0 last_frame=62 fixture_timer=108 fixture_paint=108 present_hr=0 wgc_frames=85
+rollback=1
+after_failed_hide_restored: valid_samples=23 frame_changes=22 last_frame=154 fixture_timer=155 fixture_paint=155 present_hr=0 wgc_frames=151
+FAIL parked frame continuity; restoring source

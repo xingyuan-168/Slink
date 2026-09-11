@@ -1,0 +1,79 @@
+Start testing: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+----------------------------------------------------------
+1/4 Testing: poc_gdi
+1/4 Test: poc_gdi
+Command: "D:/Projects-tools/å±å¹•å¢™/out/build/x86/Release/dwm_poc.exe" "--backend" "gdi" "--cycles" "2" "--seconds" "2"
+Directory: D:/Projects-tools/å±å¹•å¢™/out/build/x86
+"poc_gdi" start time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+Output:
+----------------------------------------------------------
+baseline outer=30,30,1936x1119 client=1920x1080 style=14cf0000 exStyle=100 dpi=96 showCmd=1
+backend=gdi maximized=0 client=1920x1080 dpi=96
+visible_occluded: valid_samples=0 frame_changes=0 last_frame=-1 fixture_timer=53 fixture_paint=53 present_hr=0 wgc_frames=0 wgc_hr=0
+FAIL visible canvas frame verification
+<end of output>
+Test time =   3.89 sec
+----------------------------------------------------------
+Test Failed.
+"poc_gdi" end time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+"poc_gdi" time elapsed: 00:00:03
+----------------------------------------------------------
+
+2/4 Testing: poc_d3d
+2/4 Test: poc_d3d
+Command: "D:/Projects-tools/å±å¹•å¢™/out/build/x86/Release/dwm_poc.exe" "--backend" "d3d" "--cycles" "2" "--seconds" "2"
+Directory: D:/Projects-tools/å±å¹•å¢™/out/build/x86
+"poc_d3d" start time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+Output:
+----------------------------------------------------------
+baseline outer=30,30,1936x1119 client=1920x1080 style=14cf0000 exStyle=100 dpi=96 showCmd=1
+backend=d3d maximized=0 client=1920x1080 dpi=96
+visible_occluded: valid_samples=0 frame_changes=0 last_frame=-1 fixture_timer=43 fixture_paint=43 present_hr=87a0001 wgc_frames=0 wgc_hr=0
+FAIL visible canvas frame verification
+<end of output>
+Test time =   3.60 sec
+----------------------------------------------------------
+Test Failed.
+"poc_d3d" end time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+"poc_d3d" time elapsed: 00:00:03
+----------------------------------------------------------
+
+3/4 Testing: poc_wgc_gdi
+3/4 Test: poc_wgc_gdi
+Command: "D:/Projects-tools/å±å¹•å¢™/out/build/x86/Release/dwm_poc.exe" "--wgc" "--backend" "gdi" "--cycles" "2" "--seconds" "2"
+Directory: D:/Projects-tools/å±å¹•å¢™/out/build/x86
+"poc_wgc_gdi" start time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+Output:
+----------------------------------------------------------
+baseline outer=30,30,1936x1119 client=1920x1080 style=14cf0000 exStyle=100 dpi=96 showCmd=1
+backend=gdi maximized=0 client=1920x1080 dpi=96
+visible_occluded: valid_samples=0 frame_changes=0 last_frame=-1 fixture_timer=64 fixture_paint=64 present_hr=0 wgc_frames=50 wgc_hr=0
+FAIL visible canvas frame verification
+<end of output>
+Test time =   3.40 sec
+----------------------------------------------------------
+Test Failed.
+"poc_wgc_gdi" end time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+"poc_wgc_gdi" time elapsed: 00:00:03
+----------------------------------------------------------
+
+4/4 Testing: poc_wgc_d3d
+4/4 Test: poc_wgc_d3d
+Command: "D:/Projects-tools/å±å¹•å¢™/out/build/x86/Release/dwm_poc.exe" "--wgc" "--backend" "d3d" "--cycles" "2" "--seconds" "2"
+Directory: D:/Projects-tools/å±å¹•å¢™/out/build/x86
+"poc_wgc_d3d" start time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+Output:
+----------------------------------------------------------
+baseline outer=30,30,1936x1119 client=1920x1080 style=14cf0000 exStyle=100 dpi=96 showCmd=1
+backend=d3d maximized=0 client=1920x1080 dpi=96
+visible_occluded: valid_samples=0 frame_changes=0 last_frame=-1 fixture_timer=54 fixture_paint=54 present_hr=87a0001 wgc_frames=1 wgc_hr=0
+FAIL visible canvas frame verification
+<end of output>
+Test time =   3.42 sec
+----------------------------------------------------------
+Test Failed.
+"poc_wgc_d3d" end time: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä
+"poc_wgc_d3d" time elapsed: 00:00:03
+----------------------------------------------------------
+
+End testing: Sep 11 10:03 ÖĞ¹ú±ê×¼Ê±¼ä

@@ -1,0 +1,4 @@
+baseline outer=-8,-8,1936x1168 client=1920x1129 style=15cf0000 exStyle=100 dpi=96 showCmd=3
+backend=gdi maximized=1 client=1920x1129 dpi=96
+park_position=1984,64 geometry_only=1
+PASS: geometry only (frame continuity NOT tested) and 100 zero-drift cycles

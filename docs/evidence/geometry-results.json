@@ -1,0 +1,22 @@
+[
+  {
+    "case": "geometry-gdi-normal",
+    "exitCode": 0,
+    "arguments": "--backend gdi --geometry-only --cycles 100 --seconds 2 "
+  },
+  {
+    "case": "geometry-gdi-maximized",
+    "exitCode": 0,
+    "arguments": "--backend gdi --geometry-only --cycles 100 --seconds 2 --maximized"
+  },
+  {
+    "case": "geometry-d3d-normal",
+    "exitCode": 0,
+    "arguments": "--backend d3d --geometry-only --cycles 100 --seconds 2 "
+  },
+  {
+    "case": "geometry-d3d-maximized",
+    "exitCode": 0,
+    "arguments": "--backend d3d --geometry-only --cycles 100 --seconds 2 --maximized"
+  }
+]
