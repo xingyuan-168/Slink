@@ -1,28 +1,24 @@
-# 架构与实施阶段
+# 实施计划 — REQ-GWM-001
 
-## 约束
+## 当前阶段
 
-x86 DLL，Windows 10 1903+，C++20/MSVC 2022/CMake，Release /MT。遵循 input/ V3 的 API，并采用 README 中记录的用户调整。V1 不实现 FILL、输入转发、外部游戏脚本、注入、录制、OCR 或进程外恢复守护。
+工程文档及原型审阅阶段。用户确认实施方案不代表本次原型获批。必须先展示原型，再记录本次明确审批；不得沿用旧提交的UI审批。
 
-## 数据与线程
+## 阶段出口
 
-易语言线程 → C ABI 验证并深拷贝 → SessionManager → 每会话 UI 线程的有序命令队列 → Canvas/Tile/后端。命令同步返回实际执行结果；错误信息保存在调用线程。所有 C++ 异常在 ABI 边界捕获。
+1. 工程准备：当前需求的调研记录、GitHub远程可达、Code Start Gate允许。
+2. UI原型：单文件PROTOTYPE.html及UI_SPEC.md覆盖全部状态；用户确认后记录 frontend scope `gwm-wall-v1` 审批，通过Frontend Gate。
+3. 单窗口验证：HWND+ROI→Canvas，客户区坐标/缩放/DPI正确；多个独立记事本及自带动态源通过。失败先定位，不直接扩展全部DLL。
+4. 正式DLL：固定槽位、并发C ABI、WGC和D3D11生命周期、状态查询。
+5. 功能/性能：标题、底图、双击、图标、设备恢复；运行TEST_PLAN中自测矩阵。
+6. 用户测试：提供易语言声明、样例、测试包与步骤并通知用户；未获得结果时标为待用户验证。
 
-SourceController 以 HWND 及进程/线程身份管理共享停放基线。首次隐藏的 Session 负责恢复；解除该 Session 对此 HWND 的最后引用或销毁时先恢复。任何关联 Tile 可发起显示。销毁窗口不能因数值句柄重用而控制新窗口。
+## 构建与发布约束
 
-## ABI
+后续构建使用MSVC Win32/C++20/静态CRT和Windows SDK，CMake配置Release；产物在out/，成品包在output/。当前机器已发现VS2022 BuildTools与SDK 10.0.26100.0，正式构建时再验证编译工具路径。
 
-保留 V3 的全部函数。整数操作返回 0 成功、非零错误码；创建失败返回 0；句柄查询失败返回 0；状态查询失败返回 -1。flags 在 V1 仅接受 0。tileIndex 从 0 开始。x86 HWND 数组仍为连续 uint64_t，不接受 uint32_t 数组冒充。
+每阶段独立提交到codex/gwm-rebuild；不恢复旧src/test实现，不提交旧测试证据作本次证据。保留已有用户工作区删除，不批量stage无关路径。
 
-数据更新先验证再提交。Session 进入关闭状态后拒绝新命令，解决排队请求，恢复停放源，释放后端/图形资源，再销毁 HWND 和消息循环，最后由非 UI 线程回收线程。恢复失败保留可重试状态。
+## 文档同步
 
-## 阶段
-
-1. 工具链、Git、调研与原型/UI评审。
-2. dwm_poc 和自带 GDI/D3D 动态测试源，验证 ROI、resize、遮挡和停放；验证失败才转 WGC。
-3. 正式 ABI 和 Session，多 Tile、标题、底图、LOGO、动态 API。
-4. 共享源窗口控制、菜单、错误恢复、并发和生命周期测试。
-5. x86 发布、易语言示例、API/构建/测试记录和资源检查。
-
-每阶段先验证，再继续。未执行的实机或运行环境测试明确标记，不用自测结果替代外部游戏兼容性。
-
+需求变更同步REQUIREMENTS/SCOPE；实现变更同步ARCHITECTURE/API_SPEC；测试结果同步TEST_REPORT；原型与真实界面保持一致；CHANGELOG仅记录真实完成状态。PROJECT_CONTEXT由context_refresh生成。

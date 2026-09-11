@@ -1,10 +1,10 @@
-# 界面评审记录
+# Frontend Gate — REQ-GWM-001
 
-- 2026-09-11：已交付 `design/PROTOTYPE.html` 和 `design/UI_SPEC.md`。
-- 用户明确回复：`UI通过`。
-- approval_record：`APPROVAL-20260911014846373823`，frontend / approved / user。
-- governance_check(frontend, new_interaction_flow, approved=true)：allowed=true。
-- 浏览器自动化工具因本地 file URL 策略拒绝自动打开原型；已执行静态 JavaScript、嵌入资源、DOM 引用检查，未声称完成自动浏览器视觉检查。用户自行查看后批准。
+scope: gwm-wall-v1
+status: pending
 
-界面评审已通过。当前阻塞来自原生捕获 PoC 的离屏连续性失败，与 UI 审批无关。
+本次原型及UI_SPEC已建立，用户尚未批准。方案确认不替代原型确认，不继承旧提交的审批。
 
+审阅内容：固定横向网格、顶部标题和编号、LOGO、等比ROI、无画面状态、双击激活、缩放行为。右侧参数区和模拟反馈只属于原型。
+
+下一步：展示本次原型，取得明确批准或修改意见。批准后调用approval_record，记录scope= gwm-wall-v1，再运行frontend gate；不得预先写入approved状态。
