@@ -1,13 +1,12 @@
 {
   "version": 6,
-  "configurePresets": [{
-    "name": "x86",
-    "displayName": "MSVC 2022 x86",
-    "generator": "Visual Studio 17 2022",
-    "architecture": "Win32",
-    "binaryDir": "${sourceDir}/out/build/x86"
-  }],
-  "buildPresets": [{"name": "x86-release", "configurePreset": "x86", "configuration": "Release"}],
+  "configurePresets": [
+    {"name": "x86", "displayName": "MSVC 2022 x86 DLL and tests", "generator": "Visual Studio 17 2022", "architecture": "Win32", "binaryDir": "${sourceDir}/out/build/x86", "cacheVariables": {"GWM_BUILD_DLL": "ON", "GWM_BUILD_TESTS": "ON"}},
+    {"name": "x64-source", "displayName": "MSVC 2022 x64 capture source only", "generator": "Visual Studio 17 2022", "architecture": "x64", "binaryDir": "${sourceDir}/out/build/x64-source", "cacheVariables": {"GWM_BUILD_DLL": "OFF", "GWM_BUILD_TESTS": "ON"}}
+  ],
+  "buildPresets": [
+    {"name": "x86-release", "configurePreset": "x86", "configuration": "Release"},
+    {"name": "x64-source-release", "configurePreset": "x64-source", "configuration": "Release"}
+  ],
   "testPresets": [{"name": "x86-release", "configurePreset": "x86", "configuration": "Release", "output": {"outputOnFailure": true}}]
 }
-

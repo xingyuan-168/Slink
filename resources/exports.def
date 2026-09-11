@@ -1,0 +1,19 @@
+LIBRARY GameWindowMapper
+EXPORTS
+    WM_StartMapping=_WM_StartMapping@48
+    WM_ReplaceWindows=_WM_ReplaceWindows@8
+    WM_SetWindow=_WM_SetWindow@8
+    WM_RemoveWindow=_WM_RemoveWindow@4
+    WM_AddWindow=_WM_AddWindow@8
+    WM_SetRegion=_WM_SetRegion@20
+    WM_SetLayout=_WM_SetLayout@8
+    WM_SetTitleA=_WM_SetTitleA@12
+    WM_SetTitleW=_WM_SetTitleW@12
+    WM_SetBackground=_WM_SetBackground@12
+    WM_SetForceBackground=_WM_SetForceBackground@8
+    WM_SetFrameRate=_WM_SetFrameRate@4
+    WM_GetCanvasWindow=_WM_GetCanvasWindow@4
+    WM_GetCanvasStatus=_WM_GetCanvasStatus@16
+    WM_GetSlotStatus=_WM_GetSlotStatus@20
+    WM_GetLastErrorTextW=_WM_GetLastErrorTextW@12
+    WM_Stop=_WM_Stop@0
