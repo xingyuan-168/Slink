@@ -40,3 +40,10 @@ approved_by: null
 原型最大化切换扩展预览区域；最小化显示恢复条；关闭只关闭模拟画布并可重新打开，不操作系统窗口。图片上传在浏览器本地读取，不上传服务器。
 
 焦点可见、表单有label、按钮有名称、错误和激活结果使用aria-live。窄屏外层面板移到画布下方；网格列数保持固定。原型不依赖网络、字体CDN或JS框架。
+
+approval:
+  type: frontend
+  scope: gwm-wall-v1
+  status: approved
+  approved_by: user
+  approved_at: 2026-09-11
