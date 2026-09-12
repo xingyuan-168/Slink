@@ -1,6 +1,7 @@
 // Real WGC client-coordinate verification against the owned dynamic source.
 // Only child processes launched here are moved/resized/maximized/closed.
 #include "capture.h"
+#include <dwmapi.h>
 #include <cstdio>
 #include <filesystem>
 #include <stdexcept>
@@ -110,6 +111,53 @@ void sample(const Pixels& pixels, const gwm::Capture& capture, int x, int y, uin
         name, x, y, sx, sy, expected & 0xffffffu, actual & 0xffffffu, same ? "true" : "false");
     if (!same) ++failures;
 }
+void diagnostics(const Pixels& pixels, const gwm::Capture& capture, HWND source) {
+    RECT outer{}, dwm{}; POINT origin{};
+    GetWindowRect(source, &outer); ClientToScreen(source, &origin);
+    const HRESULT dwmResult = DwmGetWindowAttribute(source, DWMWA_EXTENDED_FRAME_BOUNDS, &dwm, sizeof(dwm));
+    UINT visibleBorder = 0;
+    auto borderResult = DwmGetWindowAttribute(source, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, &visibleBorder, sizeof(visibleBorder));
+    RECT adjusted{0,0,640,480};
+    const auto style = static_cast<DWORD>(GetWindowLongPtrW(source, GWL_STYLE));
+    const auto exStyle = static_cast<DWORD>(GetWindowLongPtrW(source, GWL_EXSTYLE));
+    AdjustWindowRectExForDpi(&adjusted, style & ~WS_MAXIMIZE, GetMenu(source) != nullptr, exStyle, GetDpiForWindow(source));
+    std::printf("{\"source_style\":%lu,\"visible_border\":%u,\"visible_border_hr\":%ld,\"normal_adjusted_rect\":[%ld,%ld,%ld,%ld]}\n",
+        static_cast<unsigned long>(style), visibleBorder, static_cast<long>(borderResult), adjusted.left, adjusted.top, adjusted.right, adjusted.bottom);
+    std::printf("{\"geometry_diagnostic\":true,\"outer\":[%ld,%ld,%ld,%ld],\"dwm\":[%ld,%ld,%ld,%ld],\"dwm_hr\":%ld,\"client_screen_origin\":[%ld,%ld],\"texture\":[%u,%u],\"capture_size\":[%d,%d],\"source_dpi\":%u,\"sizeframe_x\":%d,\"padded_border\":%d}\n",
+        outer.left, outer.top, outer.right, outer.bottom, dwm.left, dwm.top, dwm.right, dwm.bottom,
+        static_cast<long>(dwmResult), origin.x, origin.y, pixels.width, pixels.height, capture.size.Width,
+        capture.size.Height, GetDpiForWindow(source), GetSystemMetricsForDpi(SM_CXSIZEFRAME, GetDpiForWindow(source)),
+        GetSystemMetricsForDpi(SM_CXPADDEDBORDER, GetDpiForWindow(source)));
+    auto at = [&](int x, int y, uint32_t expected) {
+        if (x < 0 || y < 0 || static_cast<UINT>(x) >= pixels.width || static_cast<UINT>(y) >= pixels.height) return false;
+        const auto actual = pixels.values[static_cast<size_t>(y) * pixels.width + x];
+        for (unsigned shift : {0u, 8u, 16u}) {
+            int a = static_cast<int>((actual >> shift) & 255), e = static_cast<int>((expected >> shift) & 255);
+            if (a < e - 3 || a > e + 3) return false;
+        }
+        return true;
+    };
+    std::printf("{\"grid_x_at_texture_y_143\":[");
+    bool first = true;
+    for (int x = 70; x <= 190; ++x) if (at(x, 143, 0x435a72)) { std::printf("%s%d", first ? "" : ",", x); first = false; }
+    std::printf("],\"grid_y_at_texture_x_120\":["); first = true;
+    for (int y = 90; y <= 210; ++y) if (at(120, y, 0x435a72)) { std::printf("%s%d", first ? "" : ",", y); first = false; }
+    std::printf("]}\n");
+    std::printf("{\"grid_right_x_at_texture_y_143\":["); first=true;
+    for(int x=static_cast<int>(pixels.width)-180;x<static_cast<int>(pixels.width);++x)if(at(x,143,0x435a72)){std::printf("%s%d",first?"":",",x);first=false;}
+    std::printf("],\"grid_bottom_y_at_texture_x_120\":[");first=true;
+    for(int y=static_cast<int>(pixels.height)-180;y<static_cast<int>(pixels.height);++y)if(at(120,y,0x435a72)){std::printf("%s%d",first?"":",",y);first=false;}
+    std::printf("]}\n");
+    std::printf("{\"matching_client_offsets\":["); first = true;
+    for (int oy = -16; oy <= 64; ++oy) for (int ox = -16; ox <= 32; ++ox) {
+        if (at(100 + ox, 120 + oy, 0x435a72) && at(110 + ox, 120 + oy, 0x131e2e) &&
+            at(120 + ox, 100 + oy, 0x435a72) && at(120 + ox, 110 + oy, 0x131e2e) &&
+            at(150 + ox, 120 + oy, 0x435a72) && at(160 + ox, 120 + oy, 0x131e2e)) {
+            std::printf("%s[%d,%d]", first ? "" : ",", ox, oy); first = false;
+        }
+    }
+    std::printf("]}\n");
+}
 void verify(gwm::Capture& capture, gwm::Graphics& graphics, HWND source, const char* backend, const char* phase) {
     const bool stable = stabilize(capture, graphics, source);
     RECT client{}; GetClientRect(source, &client);
@@ -119,6 +167,7 @@ void verify(gwm::Capture& capture, gwm::Graphics& graphics, HWND source, const c
     check(stable, "capture_geometry_stabilizes");
     if (!stable) return;
     const auto pixels = readTexture(capture, graphics);
+    diagnostics(pixels, capture, source);
     // These points avoid all text (y <= 81), the moving marker (height/2),
     // and bottom-right coordinates. Paired axis samples detect x and y offsets.
     sample(pixels, capture, 100, 120, 0x435a72, "vertical_grid_100_120");
@@ -129,8 +178,13 @@ void verify(gwm::Capture& capture, gwm::Graphics& graphics, HWND source, const c
     sample(pixels, capture, 160, 120, 0x131e2e, "second_background_160_120");
     std::fflush(stdout);
 }
-void run(const std::filesystem::path& executable, bool d3d) {
+void run(const std::filesystem::path& executable, bool d3d, bool startMaximized) {
     Source source(executable, d3d);
+    if(startMaximized) {
+        ShowWindowAsync(source.hwnd, SW_MAXIMIZE);
+        for(int retry=0;retry<100&&!IsZoomed(source.hwnd);++retry)Sleep(30);
+        Sleep(300);
+    }
     HiddenCanvas target;
     gwm::Graphics graphics(target.hwnd);
     gwm::Capture capture(source.hwnd, graphics);
@@ -138,6 +192,10 @@ void run(const std::filesystem::path& executable, bool d3d) {
     BOOL wow64 = FALSE; IsWow64Process(source.process.hProcess, &wow64);
     std::printf("{\"source_backend\":\"%s\",\"source_pid\":%lu,\"source_is_wow64\":%s}\n",
         backend, static_cast<unsigned long>(source.process.dwProcessId), wow64 ? "true" : "false");
+    if(startMaximized) {
+        verify(capture, graphics, source.hwnd, backend, "started_maximized");
+        ShowWindowAsync(source.hwnd, SW_RESTORE);
+    }
     verify(capture, graphics, source.hwnd, backend, "normal");
     check(SetWindowPos(source.hwnd, nullptr, 90, 70, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE, "move_owned_source");
     verify(capture, graphics, source.hwnd, backend, "moved");
@@ -155,14 +213,18 @@ void run(const std::filesystem::path& executable, bool d3d) {
 int wmain(int argc, wchar_t** argv) {
     wchar_t self[32768]{}; GetModuleFileNameW(nullptr, self, 32768);
     auto source = std::filesystem::path(self).parent_path() / L"dynamic_source.exe";
-    if (argc == 3 && std::wstring(argv[1]) == L"--source") source = std::filesystem::absolute(argv[2]);
-    else if (argc != 1) { std::fprintf(stderr, "Usage: capture_geometry_tests [--source path-to-dynamic_source.exe]\n"); return 2; }
+    bool startMaximized=false;
+    for(int i=1;i<argc;++i) {
+        if(std::wstring(argv[i])==L"--source"&&i+1<argc)source=std::filesystem::absolute(argv[++i]);
+        else if(std::wstring(argv[i])==L"--start-maximized")startMaximized=true;
+        else {std::fprintf(stderr,"Usage: capture_geometry_tests [--source path-to-dynamic_source.exe] [--start-maximized]\n");return 2;}
+    }
     const auto previousDpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     try {
         winrt::check_hresult(initialized);
-        run(source, false);
-        run(source, true);
+        run(source, false, startMaximized);
+        run(source, true, startMaximized);
     } catch (const winrt::hresult_error& error) {
         std::fprintf(stderr, "Capture geometry HRESULT: 0x%08lx\n", static_cast<unsigned long>(error.code().value)); ++failures;
     } catch (const std::exception& error) {
