@@ -24,6 +24,13 @@ std::shared_ptr<gwm::Image> image(Reader& r,int size){
 void options(gwm::Config& c,const uint8_t* data,int size){
     if(!size)return;
     Reader r(data,size);
+    // E-language picture constants are complete image file bytes. Accept them
+    // directly as the global fallback; no wrapper/config header is required.
+    constexpr uint8_t pngSignature[]{137,80,78,71,13,10,26,10};
+    const bool png=size>=8&&std::memcmp(data,pngSignature,8)==0;
+    const bool bmp=size>=2&&data[0]=='B'&&data[1]=='M';
+    const bool jpeg=size>=2&&data[0]==0xff&&data[1]==0xd8;
+    if(png||bmp||jpeg){c.background=image(r,size);return;}
     if(r.integer()!=1)throw GWM_INVALID_ARGUMENT;
     int fps=r.integer(),backgroundBytes=r.integer(),records=r.integer();
     if(fps!=0&&fps!=15&&fps!=30&&fps!=60)throw GWM_INVALID_ARGUMENT;

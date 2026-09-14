@@ -37,11 +37,12 @@ enum GWM_SlotState {
 
 /* One x86 stdcall entry. All input is copied before return; closing the canvas
    releases mapping resources without another call. Empty configuration uses defaults.
-   Optional config is packed little-endian with no pointers or padding:
+   A complete PNG/BMP/JPEG buffer is also accepted directly as the global image.
+   Otherwise optional config is packed little-endian with no pointers or padding:
    Header: int32 version(1), fps(0/15/30/60), defaultImageBytes, recordCount;
-   then default PNG/BMP bytes, then recordCount records.
+   then default PNG/BMP/JPEG bytes, then recordCount records.
    Record: int32 slot(1-based), x,y,w,h, titleBytes,imageBytes,flags;
-   then title bytes and PNG/BMP bytes. Each slot may occur once.
+   then title bytes and PNG/BMP/JPEG bytes. Each slot may occur once.
    flags: 1=override ROI, 2=force background, 4=UTF-16LE title (else CP936).
    Empty title uses source caption; empty image inherits global background.
    See docs/E_LANGUAGE.md for limits and E-language examples.

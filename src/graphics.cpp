@@ -19,7 +19,7 @@ std::shared_ptr<Image> decodeImage(const uint8_t* data,int size) {
     winrt::com_ptr<IWICBitmapDecoder> decoder;
     check_hresult(f->CreateDecoderFromStream(stream.get(),nullptr,WICDecodeMetadataCacheOnLoad,decoder.put()));
     GUID container{};check_hresult(decoder->GetContainerFormat(&container));
-    if(container!=GUID_ContainerFormatPng&&container!=GUID_ContainerFormatBmp)throw winrt::hresult_invalid_argument();
+    if(container!=GUID_ContainerFormatPng&&container!=GUID_ContainerFormatBmp&&container!=GUID_ContainerFormatJpeg)throw winrt::hresult_invalid_argument();
     winrt::com_ptr<IWICBitmapFrameDecode> frame;check_hresult(decoder->GetFrame(0,frame.put()));
     auto image=std::make_shared<Image>();check_hresult(frame->GetSize(&image->width,&image->height));
     if(!image->width||!image->height||image->width>4096||image->height>4096)throw winrt::hresult_invalid_argument();
@@ -115,7 +115,7 @@ void Graphics::drawRegion(ID2D1Bitmap1* b,Region roi,POINT offset,SIZE client,D2
 }
 const wchar_t* stateText(int state) {
     switch(state){case GWM_EMPTY:return L"空槽位";case GWM_WAITING:return L"等待首帧";
-    case GWM_MINIMIZED:return L"已最小化";case GWM_INVALID:return L"窗口已关闭";
+    case GWM_MINIMIZED:return L"已最小化";case GWM_INVALID:return L"窗口无效或已关闭";
     case GWM_CAPTURE_ERROR:return L"捕获失败";case GWM_FORCED_BACKGROUND:return L"已启用底图";
     case GWM_RECOVERING:return L"正在恢复图形设备";default:return L"";}
 }

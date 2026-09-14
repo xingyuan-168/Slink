@@ -169,7 +169,8 @@ void Engine::renderMain() noexcept {
                     const Slot* s=i<static_cast<int>(view.slots.size())?&view.slots[i]:nullptr;
                     if(s&&!s->title.empty())title+=s->title;
                     else if(s&&s->hwnd){
-                        wchar_t buffer[512]{};InternalGetWindowText(toWindow(s->hwnd),buffer,512);title+=buffer[0]?buffer:L"未命名窗口";
+                        wchar_t buffer[512]{};InternalGetWindowText(toWindow(s->hwnd),buffer,512);
+                        title+=buffer[0]?std::wstring(buffer):L"HWND "+std::to_wstring(s->hwnd);
                     }else title+=L"空槽位";
                     auto textBox=titleBox;textBox.left+=8; textBox.right-=6;
                     graphics->text(title,textBox,0xe6eaf0);
