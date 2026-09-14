@@ -16,11 +16,14 @@ struct Capture {
     uint64_t frameAt=0,frames=0;
     int state=GWM_WAITING,error=GWM_OK;
     POINT clientOffset{};SIZE clientSize{};
+    bool zoomed=false;UINT dpi=0;
     Capture(HWND,Graphics&);
     ~Capture();
     Capture(const Capture&)=delete;
     Capture& operator=(const Capture&)=delete;
     void update(Graphics&);
     void close() noexcept;
+private:
+    void open(Graphics&);
 };
 }

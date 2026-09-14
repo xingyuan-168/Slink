@@ -19,12 +19,8 @@ int Engine::start() {
     return startupError;
 }
 void Engine::requestStop() noexcept {stopRequested=true;state=GWM_CANVAS_STOPPING;wake.notify_all();}
-void Engine::stop() {requestStop();if(uiThread.joinable())uiThread.join();state=GWM_STOPPED;}
-int Engine::mutate(const std::function<int(Config&)>& action) {
-    if(stopRequested)return GWM_NOT_STARTED;
-    std::lock_guard lock(configMutex);if(stopRequested)return GWM_STOPPING;
-    int result=action(config);wake.notify_all();return result;
-}
+void Engine::wait() {if(uiThread.joinable())uiThread.join();}
+void Engine::stop() {requestStop();wait();state=GWM_STOPPED;}
 Config Engine::snapshot(){std::lock_guard lock(configMutex);return config;}
 void Engine::activate(int px,int py) {
     Hit target{};bool found=false;
@@ -65,11 +61,14 @@ LRESULT CALLBACK Engine::wndProc(HWND window,UINT message,WPARAM wp,LPARAM lp) n
 }
 void Engine::uiMain() noexcept {
     bool registered=false;
+    HICON largeIcon=nullptr,smallIcon=nullptr;
     auto previous=SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     try{
         WNDCLASSEXW wc{sizeof(wc)};wc.style=CS_DBLCLKS|CS_HREDRAW|CS_VREDRAW;wc.lpfnWndProc=wndProc;
         wc.hInstance=module;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-        wc.hIcon=LoadIconW(module,MAKEINTRESOURCEW(101));wc.hIconSm=wc.hIcon;wc.lpszClassName=ClassName;
+        largeIcon=static_cast<HICON>(LoadImageW(module,MAKEINTRESOURCEW(101),IMAGE_ICON,32,32,0));
+        smallIcon=static_cast<HICON>(LoadImageW(module,MAKEINTRESOURCEW(101),IMAGE_ICON,16,16,0));
+        wc.hIcon=largeIcon;wc.hIconSm=smallIcon;wc.lpszClassName=ClassName;
         if(!RegisterClassExW(&wc))throw winrt::hresult_error(HRESULT_FROM_WIN32(GetLastError()));registered=true;
         RECT r{0,0,initialWidth,initialHeight};auto style=WS_OVERLAPPEDWINDOW;
         POINT point{x,y};auto monitor=MonitorFromPoint(point,MONITOR_DEFAULTTONEAREST);
@@ -81,7 +80,8 @@ void Engine::uiMain() noexcept {
         SetWindowPos(h,nullptr,0,0,r.right-r.left,r.bottom-r.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
         SendMessageW(h,WM_SETICON,ICON_BIG,reinterpret_cast<LPARAM>(wc.hIcon));SendMessageW(h,WM_SETICON,ICON_SMALL,reinterpret_cast<LPARAM>(wc.hIconSm));
         BOOL dark=TRUE;DwmSetWindowAttribute(h,20,&dark,sizeof(dark));
-        ShowWindow(h,SW_SHOWNORMAL);UpdateWindow(h);
+        // Do not inherit STARTUPINFO.wShowWindow from a hidden/tray host.
+        SetWindowPos(h,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);UpdateWindow(h);
         renderThread=std::thread([this]{renderMain();});
         {std::lock_guard lock(wakeMutex);uiReady=true;}wake.notify_all();
         MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
@@ -92,6 +92,8 @@ void Engine::uiMain() noexcept {
     if(renderThread.joinable())renderThread.join();
     if(auto h=hwnd.exchange(nullptr);h&&IsWindow(h))DestroyWindow(h);
     if(registered)UnregisterClassW(ClassName,module);
+    if(largeIcon)DestroyIcon(largeIcon);
+    if(smallIcon)DestroyIcon(smallIcon);
     state=GWM_STOPPED;if(previous)SetThreadDpiAwarenessContext(previous);
 }
 void Engine::renderMain() noexcept {
@@ -107,7 +109,7 @@ void Engine::renderMain() noexcept {
         }else graphics=std::make_unique<Graphics>(hwnd.load());
     }catch(...){std::lock_guard lock(wakeMutex);startupError=GWM_GRAPHICS_FAILURE;}
     {std::lock_guard lock(wakeMutex);renderReady=true;}wake.notify_all();
-    if(!graphics){stopRequested=true;PostMessageW(hwnd.load(),FinishClose,0,0);if(SUCCEEDED(co))CoUninitialize();if(previous)SetThreadDpiAwarenessContext(previous);return;}
+    if(!graphics){stopRequested=true;PostMessageW(hwnd.load(),FinishClose,0,0);winrt::clear_factory_cache();if(SUCCEEDED(co))CoUninitialize();if(previous)SetThreadDpiAwarenessContext(previous);return;}
     state=GWM_RUNNING;
     int recoveryAttempts=0;
     while(!stopRequested){
@@ -118,9 +120,6 @@ void Engine::renderMain() noexcept {
             if(!graphics){
                 graphics=std::make_unique<Graphics>(hwnd.load());failures.clear();
             }
-#ifdef GWM_TEST_HOOKS
-            if(injectedFailures.exchange(0))throw winrt::hresult_error(DXGI_ERROR_DEVICE_REMOVED);
-#endif
             winrt::check_hresult(graphics->device->GetDeviceRemovedReason());
             std::set<uint64_t> active;
             for(auto& slot:view.slots){
@@ -216,6 +215,10 @@ void Engine::renderMain() noexcept {
     // endlessly rebuilding a lost driver. WM_Close wakes this wait.
     if(state==GWM_CANVAS_ERROR){std::unique_lock lock(wakeMutex);wake.wait(lock,[this]{return stopRequested.load();});}
     PostMessageW(hwnd.load(),FinishClose,0,0);
+    // Factory pointers cached by C++/WinRT must not outlive this COM apartment:
+    // its final CoUninitialize can unload the capture implementation while our
+    // DLL remains loaded, leaving IsSupported's cached vtable stale on restart.
+    winrt::clear_factory_cache();
     if(SUCCEEDED(co))CoUninitialize();if(previous)SetThreadDpiAwarenessContext(previous);
 }
 }

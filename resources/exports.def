@@ -1,19 +1,2 @@
 EXPORTS
     WM_StartMapping
-    WM_ReplaceWindows
-    WM_SetWindow
-    WM_RemoveWindow
-    WM_AddWindow
-    WM_SetRegion
-    WM_SetLayout
-    WM_SetTitleA
-    WM_SetTitleW
-    WM_SetBackground
-    WM_SetForceBackground
-    WM_SetFrameRate
-    WM_GetCanvasWindow
-    WM_GetCanvasStatus
-    WM_GetSlotStatus
-    WM_GetFrameCounters
-    WM_GetLastErrorTextW
-    WM_Stop

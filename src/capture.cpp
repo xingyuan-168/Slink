@@ -10,13 +10,19 @@ using winrt::Windows::Graphics::DirectX::DirectXPixelFormat;
 Capture::Capture(HWND h,Graphics& g):hwnd(h) {
     if(!IsWindow(h)||GetAncestor(h,GA_ROOT)!=h){state=GWM_INVALID;return;}
     GetWindowThreadProcessId(h,&process);
+    open(g);
+}
+void Capture::open(Graphics& g) {
+    try {
+    zoomed=IsZoomed(hwnd)!=FALSE;dpi=GetDpiForWindow(hwnd);
     auto interop=winrt::get_activation_factory<GraphicsCaptureItem,IGraphicsCaptureItemInterop>();
-    winrt::check_hresult(interop->CreateForWindow(h,winrt::guid_of<GraphicsCaptureItem>(),winrt::put_abi(item)));
+    winrt::check_hresult(interop->CreateForWindow(hwnd,winrt::guid_of<GraphicsCaptureItem>(),winrt::put_abi(item)));
     size=item.Size();if(size.Width<=0||size.Height<=0)throw winrt::hresult_invalid_argument();
     pool=Direct3D11CaptureFramePool::CreateFreeThreaded(g.runtimeDevice,DirectXPixelFormat::B8G8R8A8UIntNormalized,2,size);
     session=pool.CreateCaptureSession(item);
     if(winrt::Windows::Foundation::Metadata::ApiInformation::IsPropertyPresent(L"Windows.Graphics.Capture.GraphicsCaptureSession",L"IsCursorCaptureEnabled"))session.IsCursorCaptureEnabled(false);
     session.StartCapture();
+    }catch(...){close();throw;}
 }
 Capture::~Capture(){close();}
 void Capture::close() noexcept {
@@ -28,6 +34,12 @@ void Capture::update(Graphics& g) {
     DWORD pid=0;GetWindowThreadProcessId(hwnd,&pid);
     if(state==GWM_INVALID||!IsWindow(hwnd)||pid!=process){state=GWM_INVALID;close();return;}
     if(IsIconic(hwnd)){state=GWM_MINIMIZED;return;}
+    if(zoomed!=(IsZoomed(hwnd)!=FALSE)||dpi!=GetDpiForWindow(hwnd)){
+        // WGC can retain the session's original non-client transform across
+        // maximize/restore. Recreating only the frame pool does not refresh it.
+        close();frameAt=0;clientOffset={};clientSize={};state=GWM_WAITING;
+        open(g);
+    }
     if(!pool){state=GWM_CAPTURE_ERROR;error=GWM_GRAPHICS_FAILURE;return;}
     // Poll on the render thread; free-threaded WGC queues at most two frames.
     // No DLL callback executes on a capture thread during unload.

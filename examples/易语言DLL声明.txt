@@ -1,92 +1,17 @@
 .版本 2
 
-.DLL命令 WM_StartMapping, 整数型, "GameWindowMapper.dll", "WM_StartMapping", , 启动画布；返回0成功
-    .参数 句柄数组, 整数型, 数组, 直接传一维整数数组；DLL接收连续元素数据地址
+.DLL命令 开始映射, 整数型, "GameWindowMapper.dll", "WM_StartMapping", , 返回0成功；关闭画布自动释放
+    .参数 句柄数组, 整数型, 数组, 一维整数数组；元素为HWND原始值
     .参数 数量, 整数型
     .参数 行数, 整数型
     .参数 列数, 整数型
     .参数 画布X, 整数型
     .参数 画布Y, 整数型
-    .参数 画布宽, 整数型
+    .参数 画布宽, 整数型, , 客户区物理像素
     .参数 画布高, 整数型
     .参数 裁剪X, 整数型
     .参数 裁剪Y, 整数型
     .参数 裁剪宽, 整数型
     .参数 裁剪高, 整数型
-
-.DLL命令 WM_ReplaceWindows, 整数型, "GameWindowMapper.dll", "WM_ReplaceWindows"
-    .参数 句柄数组, 整数型, 数组, 直接传一维整数数组；数量不得超过实际元素数
-    .参数 数量, 整数型
-
-.DLL命令 WM_SetWindow, 整数型, "GameWindowMapper.dll", "WM_SetWindow"
-    .参数 编号, 整数型
-    .参数 句柄, 整数型
-
-.DLL命令 WM_RemoveWindow, 整数型, "GameWindowMapper.dll", "WM_RemoveWindow"
-    .参数 编号, 整数型
-
-.DLL命令 WM_AddWindow, 整数型, "GameWindowMapper.dll", "WM_AddWindow"
-    .参数 句柄, 整数型
-    .参数 返回编号, 整数型, 传址
-
-.DLL命令 WM_SetRegion, 整数型, "GameWindowMapper.dll", "WM_SetRegion"
-    .参数 编号, 整数型
-    .参数 X, 整数型
-    .参数 Y, 整数型
-    .参数 宽, 整数型
-    .参数 高, 整数型
-
-.DLL命令 WM_SetLayout, 整数型, "GameWindowMapper.dll", "WM_SetLayout"
-    .参数 行数, 整数型
-    .参数 列数, 整数型
-
-.DLL命令 WM_SetTitleA, 整数型, "GameWindowMapper.dll", "WM_SetTitleA", , CP936文本；长度不含末尾0
-    .参数 编号, 整数型
-    .参数 标题, 文本型
-    .参数 字节数, 整数型
-
-.DLL命令 WM_SetTitleW, 整数型, "GameWindowMapper.dll", "WM_SetTitleW", , UTF16LE字节集；长度为双字节代码单元数
-    .参数 编号, 整数型
-    .参数 UTF16标题, 字节集, , 直接传UTF16LE字节集数据
-    .参数 字符数, 整数型
-
-.DLL命令 WM_SetBackground, 整数型, "GameWindowMapper.dll", "WM_SetBackground", , 编号0设置默认底图；字节数0清除
-    .参数 编号, 整数型
-    .参数 图片文件字节, 字节集, , 直接传PNG或BMP文件字节集数据
-    .参数 字节数, 整数型
-
-.DLL命令 WM_SetForceBackground, 整数型, "GameWindowMapper.dll", "WM_SetForceBackground"
-    .参数 编号, 整数型
-    .参数 启用, 整数型
-
-.DLL命令 WM_SetFrameRate, 整数型, "GameWindowMapper.dll", "WM_SetFrameRate", , 15或30或60
-    .参数 帧率, 整数型
-
-.DLL命令 WM_GetCanvasWindow, 整数型, "GameWindowMapper.dll", "WM_GetCanvasWindow"
-    .参数 返回句柄, 整数型, 传址
-
-.DLL命令 WM_GetCanvasStatus, 整数型, "GameWindowMapper.dll", "WM_GetCanvasStatus"
-    .参数 返回状态, 整数型, 传址
-    .参数 返回数量, 整数型, 传址
-    .参数 返回行数, 整数型, 传址
-    .参数 返回列数, 整数型, 传址
-
-.DLL命令 WM_GetSlotStatus, 整数型, "GameWindowMapper.dll", "WM_GetSlotStatus"
-    .参数 编号, 整数型
-    .参数 返回句柄, 整数型, 传址
-    .参数 返回状态, 整数型, 传址
-    .参数 返回错误, 整数型, 传址
-    .参数 返回帧龄毫秒, 整数型, 传址
-
-.DLL命令 WM_GetLastErrorTextW, 整数型, "GameWindowMapper.dll", "WM_GetLastErrorTextW", , 缓冲区须预先分配为容量乘2字节
-    .参数 UTF16缓冲区, 字节集, , 传预先分配的可写字节集变量；不传临时转换结果
-    .参数 容量字符数, 整数型
-    .参数 返回所需字符数, 整数型, 传址
-
-.DLL命令 WM_GetFrameCounters, 整数型, "GameWindowMapper.dll", "WM_GetFrameCounters", , uint32回绕计数；编号0仅查画布；调用返回0后读取输出
-    .参数 编号, 整数型
-    .参数 返回捕获数, 整数型, 传址, 指定槽位的WGC交付帧数；编号0时为0；重绑槽位后重置
-    .参数 返回提交数, 整数型, 传址, 整个画布成功Present提交数；不是显示器刷新数
-    .参数 返回已运行毫秒, 整数型, 传址, 本次画布实例启动以来的毫秒数；uint32回绕
-
-.DLL命令 WM_Stop, 整数型, "GameWindowMapper.dll", "WM_Stop", , 退出或卸载DLL前必须调用
+    .参数 配置, 字节集, , 不需要高级配置时传空字节集
+    .参数 配置长度, 整数型, , 取字节集长度（配置）

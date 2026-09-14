@@ -26,11 +26,13 @@ Push-Location $taskRoot
 try {
     & $CMakePath --preset $taskPreset
     if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
-    & $CMakePath --build --preset "$taskPreset-release" --parallel
+    if ($X64Source) { & $CMakePath --build --preset "$taskPreset-release" --target dynamic_source --parallel }
+    elseif ($Test) { & $CMakePath --build --preset "$taskPreset-release" --parallel }
+    else { & $CMakePath --build --preset "$taskPreset-release" --target GameWindowMapper --parallel }
     if ($LASTEXITCODE -ne 0) { throw 'CMake build failed' }
     if ($Test) {
         $taskCtest = Join-Path (Split-Path -Parent $CMakePath) 'ctest.exe'
-        & $taskCtest --preset x86-release
+        & $taskCtest --preset x86-release -R "^single_entry_lifecycle$"
         if ($LASTEXITCODE -ne 0) { throw 'CTest failed' }
     }
 } finally { Pop-Location }

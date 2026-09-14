@@ -1,51 +1,29 @@
 # GameWindowMapper 屏幕墙
 
-供 32 位易语言调用的 Windows 原生窗口墙 DLL。按传入数组的原始顺序，裁剪窗口客户区并显示到可缩放网格。
+供 32 位易语言调用的 Windows 原生窗口墙 DLL。按传入 HWND 数组的原始顺序，裁剪客户区并显示到可缩放网格。
 
-## 当前状态
+## 使用与交付
 
-2026-09-14：x86 DLL、演示宿主、动态测试源及易语言声明已构建，统一整理至 output/，交由用户进行易语言接入测试。实际通过项、环境限制和用户易语言测试状态以 [测试报告](docs/TEST_REPORT.md) 为准。HTML 原型中的画面与 HWND 仍是演示数据。
+正式交付只有 `output/GameWindowMapper.dll` 和 `output/使用说明.md`。唯一命令是 `WM_StartMapping`（易语言命名“开始映射”），包含全部启动配置；运行期间不更新。关闭画布自动释放映射资源，无需停止命令；改变参数时关闭后重新启动。
 
-- [交互原型](docs/design/PROTOTYPE.html)：单文件、无外部资源，可直接双击打开。
-- [界面规格](docs/design/UI_SPEC.md)
-- [实施阶段](docs/IMPLEMENTATION_PLAN.md)
-- [接口约定](docs/API_SPEC.md)
-- [测试计划](docs/TEST_PLAN.md)
-- [测试记录](docs/TEST_REPORT.md)
+新版采用 14 参数声明，不能沿用旧版 12 参数声明。[使用说明](docs/E_LANGUAGE.md) 包含完整声明、默认参数、易语言示例、可选配置字节集格式及返回码。LOGO 内嵌于 DLL。开发源码、测试 EXE、ICO、头文件和测试报告留在仓库，不复制到交付目录。
 
-以 `input/GameWindowMapper_DLL_V2开发设计文档_修订版.md` 和本次用户确认的方案为准。旧提交只作历史参考，不继承离屏隐藏要求、旧原型审批或旧测试结果。
+## 技术与开发验证
 
-## 技术与交付
-
-C++20 / MSVC / CMake / x86 / 静态 CRT；WGC + D3D11，Direct2D/DirectWrite 绘制文字，WIC 解码 BMP/PNG。运行基线 Windows 10 1903+、Windows 11。
-
-交付内容包含 DLL、C 头文件、易语言调用声明及样例、测试 EXE、多尺寸 ICO、构建脚本和测试报告。用户负责易语言及其他目标窗口的实际接入测试；C++ 宿主验证不替代易语言测试。
-
-## 构建与试用
-
-安装 VS 2022 C++ Build Tools、Windows SDK 10.0.18362 或更新版本、CMake 3.25+。在项目根目录执行：
+C++20 / MSVC / CMake / x86 / 静态 CRT；WGC + D3D11、D2D/DirectWrite、WIC。Windows 10 1903+ / Windows 11。源 HWND 可以来自 x86/x64 应用。
 
 ```powershell
+./scripts/build.ps1
+./scripts/package.ps1 -SkipBuild
+# 仅在开发时：编译测试并运行单入口/关闭释放短验证
 ./scripts/build.ps1 -Test
-./scripts/build.ps1 -X64Source
-./out/build/x86/Release/mapper_demo.exe --hwnds 123456,456789 --rows 1 --cols 2 --region 0 0 800 600
 ```
 
-请将示例数值替换为真实顶层 HWND。所有槽位从 1 开始，源窗口可以来自 x86/x64 进程。构建中间产物位于 `out/build/x86/Release`；所有交付文件统一放在 `output/`。执行 `./scripts/package.ps1 -SkipBuild` 直接整理现有产物，不重编译、不启动测试。脚本默认输出到 `output/`，自定义路径也必须位于该目录内。
+构建中间产物位于 `out/`；打包只允许输出到项目 `output/`，发现未知文件时拒绝覆盖或删除。用户的 `demo.e` 已按本次授权整理至 `examples/demo.e`，未修改内容。
 
-接入时取用 `output/GameWindowMapper.dll`、`output/examples/易语言DLL声明.txt` 和 `output/examples/易语言调用示例.txt`。将 DLL 放到 32 位易语言 EXE 同目录；图标使用 `output/GameWindowMapper.ico`。打包附带源码、构建脚本、文档及 SHA256SUMS.txt，故障注入专用 DLL 不交付。
+实际验证和限制见 [测试报告](docs/TEST_REPORT.md)。易语言和其他目标窗口由用户验收；本次不追加长时间压力测试。需求优先级为用户最新确认 > input 修订版 > 历史对话。input 只读。
 
-- [易语言调用与日志](docs/E_LANGUAGE.md)
-- [DLL 声明](examples/易语言DLL声明.txt)
-- [易语言调用示例](examples/易语言调用示例.txt)
-- [C 头文件](include/GameWindowMapper.h)
-
-每次卸载 DLL 或退出宿主前调用 `WM_Stop` 并等待其返回。关闭画布不会关闭源窗口。DLL 不会自动寻找窗口，也不改变宿主全局 DPI。
-
-## 文档与原型检查
-
-```powershell
-py -3 scripts/verify_prototype.py
-```
-
-此命令只验证本阶段产物，不代表 DLL、捕获性能或真实窗口测试通过。
+- [接口约定](docs/API_SPEC.md)
+- [架构](docs/ARCHITECTURE.md)
+- [范围](docs/SCOPE.md)
+- [批准的原型](docs/design/PROTOTYPE.html)
