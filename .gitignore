@@ -18,6 +18,8 @@ dist/
 build/
 *.log
 out/
+output/*
+!output/.gitkeep
 *.user
 *.suo
 .vs/

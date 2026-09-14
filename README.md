@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-2026-09-11：用户已批准本次原型。x86 原生 DLL、演示宿主、动态测试源及易语言声明已经实现，正在进行开发端验收。实际通过项、环境限制和用户易语言测试状态以 [测试报告](docs/TEST_REPORT.md) 为准。HTML 原型中的画面与 HWND 仍是演示数据。
+2026-09-14：x86 DLL、演示宿主、动态测试源及易语言声明已构建，统一整理至 output/，交由用户进行易语言接入测试。实际通过项、环境限制和用户易语言测试状态以 [测试报告](docs/TEST_REPORT.md) 为准。HTML 原型中的画面与 HWND 仍是演示数据。
 
 - [交互原型](docs/design/PROTOTYPE.html)：单文件、无外部资源，可直接双击打开。
 - [界面规格](docs/design/UI_SPEC.md)
@@ -31,7 +31,9 @@ C++20 / MSVC / CMake / x86 / 静态 CRT；WGC + D3D11，Direct2D/DirectWrite 绘
 ./out/build/x86/Release/mapper_demo.exe --hwnds 123456,456789 --rows 1 --cols 2 --region 0 0 800 600
 ```
 
-请将示例数值替换为真实顶层 HWND。所有槽位从 1 开始，源窗口可以来自 x86/x64 进程。产物位于 `out/build/x86/Release`。打包使用 `./scripts/package.ps1 -SkipBuild`，输出路径由脚本返回。
+请将示例数值替换为真实顶层 HWND。所有槽位从 1 开始，源窗口可以来自 x86/x64 进程。构建中间产物位于 `out/build/x86/Release`；所有交付文件统一放在 `output/`。执行 `./scripts/package.ps1 -SkipBuild` 直接整理现有产物，不重编译、不启动测试。脚本默认输出到 `output/`，自定义路径也必须位于该目录内。
+
+接入时取用 `output/GameWindowMapper.dll`、`output/examples/易语言DLL声明.txt` 和 `output/examples/易语言调用示例.txt`。将 DLL 放到 32 位易语言 EXE 同目录；图标使用 `output/GameWindowMapper.ico`。打包附带源码、构建脚本、文档及 SHA256SUMS.txt，故障注入专用 DLL 不交付。
 
 - [易语言调用与日志](docs/E_LANGUAGE.md)
 - [DLL 声明](examples/易语言DLL声明.txt)
