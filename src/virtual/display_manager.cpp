@@ -436,9 +436,14 @@ DWORD ConfigureDriver() {
     const std::wstring path = directory + L"\\vdd_settings.xml";
     const DWORD attributes = GetFileAttributesW(path.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) return ERROR_ACCESS_DENIED;
-    Handle file(CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+    Handle file(CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!file.valid()) return GetLastError();
+    BY_HANDLE_FILE_INFORMATION fileInfo{};
+    if (!GetFileInformationByHandle(file.value, &fileInfo)) return GetLastError();
+    if ((fileInfo.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) || fileInfo.nNumberOfLinks != 1)
+        return ERROR_ACCESS_DENIED;
+    if (!SetEndOfFile(file.value)) return GetLastError();
     DWORD bytes{};
     if (!WriteFile(file.value, kXml, sizeof(kXml) - 1, &bytes, nullptr) || bytes != sizeof(kXml) - 1) return GetLastError() ? GetLastError() : ERROR_WRITE_FAULT;
     if (!FlushFileBuffers(file.value)) return GetLastError();
@@ -464,9 +469,14 @@ DWORD StageVerifiedPackage(std::vector<Handle>& originals, std::wstring& directo
         const std::wstring destination = directory + L"\\" + names[index];
         const DWORD attributes = GetFileAttributesW(destination.c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) return ERROR_ACCESS_DENIED;
-        Handle output(CreateFileW(destination.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+        Handle output(CreateFileW(destination.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         if (!output.valid()) return GetLastError();
+        BY_HANDLE_FILE_INFORMATION fileInfo{};
+        if (!GetFileInformationByHandle(output.value, &fileInfo)) return GetLastError();
+        if ((fileInfo.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) || fileInfo.nNumberOfLinks != 1)
+            return ERROR_ACCESS_DENIED;
+        if (!SetEndOfFile(output.value)) return GetLastError();
         if (!SetFilePointerEx(originals[index].value, {}, nullptr, FILE_BEGIN)) return GetLastError();
         std::array<BYTE, 16384> buffer{};
         for (;;) {
