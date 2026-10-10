@@ -1,0 +1,7 @@
+#pragma code_page(65001)
+#include <windows.h>
+501 RCDATA "@GWM_HELPER_EXE@"
+502 RCDATA "@GWM_VENDOR_DIR@/MttVDD.inf"
+503 RCDATA "@GWM_VENDOR_DIR@/MttVDD.dll"
+504 RCDATA "@GWM_VENDOR_DIR@/mttvdd.cat"
+505 RCDATA "@CMAKE_CURRENT_SOURCE_DIR@/third_party/VirtualDisplayDriver/LICENSE.txt"
