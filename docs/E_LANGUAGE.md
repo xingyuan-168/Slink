@@ -56,7 +56,7 @@
 示例的 2×2 顺序是：左上窗口2，右上窗口1，左下空位，右下窗口2。输入顺序不会重排；同一 HWND 可出现多次。源窗口失效不会使后面的编号前移。
 
 - 画布 X/Y 是屏幕位置；宽高是初始客户区物理像素，必须为正且不超过 16384。支持自由缩放与最大化。
-- 裁剪 X/Y 以源窗口客户区左上角为原点，必须非负；宽高必须为正，坐标加宽高不能超过 2147483647。超出源客户区部分填深色，按请求区域比例等比居中显示。
+- 裁剪 X/Y 以源窗口客户区左上角为原点，必须非负；宽高必须为正，坐标加宽高不能超过 2147483647。整个请求区域横纵分别缩放，默认拉伸铺满格子的画面区域，允许变形而不额外裁边；超出源客户区的部分按对应位置填深色。标题区单独保留，底图仍等比显示。
 - 行列必须为正，乘积不超过 64，且不小于数量；数量为 0 时创建空画布。
 - 空配置默认 30 FPS、统一裁剪、自动读取窗口标题、深色底图。
 - 双击格子标题或画面会尝试恢复并激活对应源窗口；若系统拒绝激活，会尝试闪烁源窗口任务栏。
@@ -155,3 +155,31 @@
 先用最小示例启动，再检查乱序/重复 HWND、中文标题、底图、双击激活、最小化恢复，以及关闭后重新启动。若出现问题，请提供返回码、调用参数、Windows 版本、目标窗口名称及操作步骤；异步捕获问题会显示在对应格子内。
 
 本版只做短时原生验证；易语言声明与示例尚需你在易语言环境实际确认。旧版长时间测试不代表本版验收结果。
+
+## 6. 第三方许可
+
+新版构建内嵌 VirtualDrivers Virtual Display Driver 25.7.23 原始签名 AMD64 驱动包，来源：[发布页](https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/tag/25.7.23)。虚拟屏画布交互尚在接续集成，当前功能状态以随交付说明为准。驱动原文件保持完整，许可如下：
+
+```text
+MIT License
+
+Copyright (c) 2024 Virtual Display
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

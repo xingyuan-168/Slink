@@ -26,6 +26,7 @@ updated_at: 2026-10-09
 - 风险：发布签名不等于本机安装验收通过；安装需要管理员授权，可能要求重启。现有实体扩展屏及重叠验证不能替代 IDD + WGC + 大漠的联合验证。
 - 发布资产：VirtualDisplayDriver-x86.Driver.Only.zip，132118 字节；发布页 SHA256 e24210692b442b39af763536330ce78b423f19342b7a7792c26de3944e418b3a。
 - 本机核验（2026-10-09）：ZIP SHA256 匹配；INF 为 NTamd64、DriverVer=12/24/2024,11.30.4.434、UMDF 2.25 / IddCx0102；DLL PE Machine=0x8664。CAT/DLL Authenticode 均 Valid，签名人为 SignPath Foundation；signtool verify /pa /c 对 INF 验证通过。尚未安装，不能据此声称设备已运行。
+- 本机集成（2026-10-10）：用户允许 Windows 发布者确认后安装成功，项目根设备 ROOT\\GAMEWINDOWMAPPERVDD\\0000 / oem78.inf；非主扩展屏、WGC 动态窗口往返、独立恢复辅助程序短测通过。仅为本机证据，尚不代表 Windows 10 或大漠兼容通过；未导入根证书或更改签名策略。
 
 ### Microsoft Indirect Display Driver Sample
 
@@ -73,6 +74,9 @@ reason: 复用 VirtualDrivers 25.7.23 原始签名驱动，构建轻量安装、
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclientrect — 客户区坐标和半开边界。
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow — 前台激活受系统限制。
 - https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-seticon — 窗口大小图标。
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/install/troubleshooting-driver-signing-installation — 目录 Authenticode 验证与实际设备安装策略需分别判断；保留系统发布者确认。
+- https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes — 打包桌面应用的 AppData 文件路径可能重定向；本机已观察到逻辑/物理映像路径不同。
+- https://learn.microsoft.com/en-us/windows/desktop/api/winbase/ns-winbase-file_id_info — 打开的文件 ID 和卷编号用于判断两个句柄是否指向同一文件；用于恢复服务身份核验。
 
 本次已阅读项目说明、许可证、接口文档以及 Win32CaptureSample 的 SimpleCapture.cpp/.h 和 CropAndLock 的 ThumbnailCropAndLockWindow.cpp。2026-09-11 核验 HEAD：Win32CaptureSample `49fefe79fd9b11025f0b5eb91783a98888516070`；PowerToys `bb656da414e09808f6d25c98dca4313e7e37f828`。仅参考 API 与生命周期设计，未复制项目代码、未引入这些项目的二进制或源代码依赖。
 

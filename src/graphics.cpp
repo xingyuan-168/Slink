@@ -102,14 +102,19 @@ void Graphics::drawImage(ID2D1Bitmap1* b,D2D1_RECT_F dest) {
     dc->DrawBitmap(b,r,1,D2D1_INTERPOLATION_MODE_LINEAR);
 }
 void Graphics::drawRegion(ID2D1Bitmap1* b,Region roi,POINT offset,SIZE client,D2D1_RECT_F area) {
-    if(!b)return;auto sz=b->GetPixelSize();
+    if(!b||roi.w<=0||roi.h<=0||area.right<=area.left||area.bottom<=area.top)return;
+    auto sz=b->GetPixelSize();
     double sx=double(roi.x)+offset.x,sy=double(roi.y)+offset.y;
     double l=std::max({sx,double(offset.x),0.0}),t=std::max({sy,double(offset.y),0.0});
     double r=std::min({sx+roi.w,double(offset.x)+client.cx,double(sz.width)});
     double bottom=std::min({sy+roi.h,double(offset.y)+client.cy,double(sz.height)});
     if(r<=l||bottom<=t)return;
-    auto full=fit(float(roi.w),float(roi.h),area);double scale=(full.right-full.left)/roi.w;
-    auto dst=D2D1::RectF(float(full.left+(l-sx)*scale),float(full.top+(t-sy)*scale),float(full.left+(r-sx)*scale),float(full.top+(bottom-sy)*scale));
+    // Scale the entire requested ROI to the tile. Clip only the source/client
+    // intersection so out-of-bounds parts keep their corresponding background.
+    const double scaleX=double(area.right-area.left)/roi.w;
+    const double scaleY=double(area.bottom-area.top)/roi.h;
+    auto dst=D2D1::RectF(float(area.left+(l-sx)*scaleX),float(area.top+(t-sy)*scaleY),
+        float(area.left+(r-sx)*scaleX),float(area.top+(bottom-sy)*scaleY));
     auto src=D2D1::RectF(float(l),float(t),float(r),float(bottom));
     dc->DrawBitmap(b,dst,1,D2D1_INTERPOLATION_MODE_LINEAR,src);
 }

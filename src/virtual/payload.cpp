@@ -244,7 +244,7 @@ std::wstring PrepareRuntimePayload(HINSTANCE module) {
     if (driver.size() + 32 >= MAX_PATH) Fail(ERROR_FILENAME_EXCED_RANGE, "Runtime path exceeds SetupAPI path limit");
     constexpr Payload driverFiles[]{
         {502, L"MttVDD.inf", "550d211fe481e74dfe3f9d724ed78be48b3a9113405965d683d9373e8d672f5d"},
-        {503, L"MttVDD.dll", "c9ca837f57a98fbd43bc416a7f535a95843626e7759eaf85cf0cd7ce334dbbb05"},
+        {503, L"MttVDD.dll", "c9ca837f57a98fbd43bc416a7f535a95843626e7759eaf85cf0cd7ce334dbb05"},
         {504, L"mttvdd.cat", "08a0093fc9b2e32b287a6f8a77ca4de0a31830d29fc33d2b13a918dc859468f6"},
         {505, L"LICENSE.txt", GWM_PAYLOAD_LICENSE_SHA256}
     };

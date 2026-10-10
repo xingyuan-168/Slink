@@ -72,6 +72,14 @@ void pixel(const std::vector<uint32_t>& pixels, int x, int y, uint32_t expected,
     if (!equal) ++failures;
 }
 
+void covered(const std::vector<uint32_t>& pixels, int x, int y, const char* name) {
+    // Linear filtering can mix a source edge with its adjacent texel. Check
+    // coverage at the destination edge separately from exact interior colors.
+    const bool pass = (pixels[static_cast<size_t>(y) * 64 + x] & 0xffffffu) != (Background & 0xffffffu);
+    std::printf("{\"test\":\"%s\",\"pass\":%s}\n", name, pass ? "true" : "false");
+    if (!pass) ++failures;
+}
+
 std::vector<uint32_t> draw(gwm::Graphics& graphics, ID2D1Bitmap1* bitmap,
     gwm::Region roi, POINT offset, SIZE client, D2D1_RECT_F area) {
     graphics.begin();
@@ -104,7 +112,7 @@ void run() {
     auto bitmap = graphics.bitmap(texture.get());
 
     // All expectations below are deliberately hardcoded for integer scaling.
-    // They do not recalculate fit/intersection using the production formula.
+    // They do not recalculate scaling/intersection using the production formula.
     auto result = draw(graphics, bitmap.get(), {0, 0, 8, 8}, {4, 4}, {8, 8}, D2D1::RectF(8, 8, 40, 40));
     pixel(result, 16, 16, Red, "client_offset_top_left");
     pixel(result, 32, 16, Green, "client_offset_top_right");
@@ -123,7 +131,7 @@ void run() {
     pixel(result, 8, 8, Yellow, "outside_roi_valid_quarter");
     pixel(result, 24, 8, Background, "outside_roi_right_padding");
     pixel(result, 8, 24, Background, "outside_roi_bottom_padding");
-    pixel(result, 24, 24, Background, "outside_roi_no_stretch");
+    pixel(result, 24, 24, Background, "outside_roi_preserves_requested_bounds");
 
     result = draw(graphics, bitmap.get(), {0, 0, 12, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 48, 32));
     pixel(result, 8, 8, Red, "wide_roi_valid_left");
@@ -132,16 +140,37 @@ void run() {
     pixel(result, 40, 24, Background, "client_clip_excludes_chrome_bottom");
 
     result = draw(graphics, bitmap.get(), {0, 0, 8, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 64, 32));
-    pixel(result, 8, 16, Background, "horizontal_center_left_padding");
-    pixel(result, 56, 16, Background, "horizontal_center_right_padding");
-    pixel(result, 24, 8, Red, "horizontal_center_left_quadrant");
-    pixel(result, 40, 24, Yellow, "horizontal_center_right_quadrant");
+    pixel(result, 8, 8, Red, "wide_tile_fills_top_left");
+    pixel(result, 56, 8, Green, "wide_tile_fills_top_right");
+    pixel(result, 8, 24, Blue, "wide_tile_fills_bottom_left");
+    pixel(result, 56, 24, Yellow, "wide_tile_fills_bottom_right");
+    covered(result, 0, 0, "wide_tile_top_left_edge_covered");
+    covered(result, 63, 31, "wide_tile_bottom_right_edge_covered");
 
     result = draw(graphics, bitmap.get(), {0, 0, 8, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 32, 64));
-    pixel(result, 16, 8, Background, "vertical_center_top_padding");
-    pixel(result, 16, 56, Background, "vertical_center_bottom_padding");
-    pixel(result, 8, 24, Red, "vertical_center_top_quadrant");
-    pixel(result, 24, 40, Yellow, "vertical_center_bottom_quadrant");
+    pixel(result, 8, 8, Red, "tall_tile_fills_top_left");
+    pixel(result, 24, 8, Green, "tall_tile_fills_top_right");
+    pixel(result, 8, 56, Blue, "tall_tile_fills_bottom_left");
+    pixel(result, 24, 56, Yellow, "tall_tile_fills_bottom_right");
+    covered(result, 0, 0, "tall_tile_top_left_edge_covered");
+    covered(result, 31, 63, "tall_tile_bottom_right_edge_covered");
+
+    result = draw(graphics, bitmap.get(), {0, 0, 8, 4}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 32, 64));
+    pixel(result, 4, 8, Red, "wide_roi_tall_tile_left_edge");
+    pixel(result, 28, 52, Green, "wide_roi_tall_tile_right_edge");
+    result = draw(graphics, bitmap.get(), {0, 0, 4, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 64, 32));
+    pixel(result, 8, 4, Red, "tall_roi_wide_tile_top_edge");
+    pixel(result, 52, 28, Blue, "tall_roi_wide_tile_bottom_edge");
+
+    result = draw(graphics, bitmap.get(), {4, 4, 8, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 64, 32));
+    pixel(result, 16, 8, Yellow, "unequal_scale_valid_quarter");
+    pixel(result, 48, 8, Background, "unequal_scale_right_padding");
+    pixel(result, 16, 24, Background, "unequal_scale_bottom_padding");
+
+    result = draw(graphics, bitmap.get(), {-4, -4, 8, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 64, 32));
+    pixel(result, 48, 24, Red, "negative_roi_unequal_scale_valid_quarter");
+    pixel(result, 16, 24, Background, "negative_roi_unequal_scale_left_padding");
+    pixel(result, 48, 8, Background, "negative_roi_unequal_scale_top_padding");
 
     result = draw(graphics, bitmap.get(), {20, 20, 8, 8}, {4, 4}, {8, 8}, D2D1::RectF(0, 0, 32, 32));
     pixel(result, 8, 8, Background, "fully_outside_roi_is_background");

@@ -6,7 +6,7 @@ $taskUrl = 'https://github.com/VirtualDrivers/Virtual-Display-Driver/releases/do
 $taskZipHash = 'e24210692b442b39af763536330ce78b423f19342b7a7792c26de3944e418b3a'
 $taskFiles = [ordered]@{
     'MttVDD.inf' = '550d211fe481e74dfe3f9d724ed78be48b3a9113405965d683d9373e8d672f5d'
-    'MttVDD.dll' = 'c9ca837f57a98fbd43bc416a7f535a95843626e7759eaf85cf0cd7ce334dbbb05'
+    'MttVDD.dll' = 'c9ca837f57a98fbd43bc416a7f535a95843626e7759eaf85cf0cd7ce334dbb05'
     'mttvdd.cat' = '08a0093fc9b2e32b287a6f8a77ca4de0a31830d29fc33d2b13a918dc859468f6'
 }
 

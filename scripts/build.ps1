@@ -1,5 +1,6 @@
 param(
     [switch]$Test,
+    [switch]$VirtualDisplayTests,
     [switch]$X64Source,
     [switch]$X64Helper,
     [string]$CMakePath
@@ -23,6 +24,7 @@ if (-not $CMakePath -or -not (Test-Path -LiteralPath $CMakePath)) {
 }
 if ($X64Source -and $X64Helper) { throw 'Choose only one of -X64Source and -X64Helper.' }
 if ($Test -and ($X64Source -or $X64Helper)) { throw '-Test applies to the x86 DLL build.' }
+if ($VirtualDisplayTests -and -not $Test) { throw '-VirtualDisplayTests requires -Test and an installed own driver.' }
 $taskPreset = if ($X64Source) { 'x64-source' } elseif ($X64Helper) { 'x64-helper' } else { 'x86' }
 Push-Location $taskRoot
 try {
@@ -34,15 +36,22 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'x64 helper build failed' }
         if ($X64Helper) { return }
     }
-    & $CMakePath --preset $taskPreset
+    if ($taskPreset -eq 'x86') {
+        $taskDisplayTests = if ($VirtualDisplayTests) { 'ON' } else { 'OFF' }
+        & $CMakePath --preset $taskPreset "-DGWM_ENABLE_DISPLAY_TESTS=$taskDisplayTests"
+    } else { & $CMakePath --preset $taskPreset }
     if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
     if ($X64Source) { & $CMakePath --build --preset "$taskPreset-release" --target dynamic_source --parallel }
-    elseif ($Test) { & $CMakePath --build --preset "$taskPreset-release" --parallel }
+    elseif ($VirtualDisplayTests) {
+        & $CMakePath --build --preset "$taskPreset-release" --target native_tests gpu_geometry_tests virtual_capture_tests recovery_integration_tests --parallel
+    }
+    elseif ($Test) { & $CMakePath --build --preset "$taskPreset-release" --target native_tests --parallel }
     else { & $CMakePath --build --preset "$taskPreset-release" --target GameWindowMapper --parallel }
     if ($LASTEXITCODE -ne 0) { throw 'CMake build failed' }
     if ($Test) {
         $taskCtest = Join-Path (Split-Path -Parent $CMakePath) 'ctest.exe'
-        & $taskCtest --preset x86-release -R "^single_entry_lifecycle$"
+        $taskFilter = if ($VirtualDisplayTests) { '^(single_entry_lifecycle|gpu_geometry|virtual_capture|recovery_integration)$' } else { '^single_entry_lifecycle$' }
+        & $taskCtest --preset x86-release -R $taskFilter --output-on-failure
         if ($LASTEXITCODE -ne 0) { throw 'CTest failed' }
     }
 } finally { Pop-Location }

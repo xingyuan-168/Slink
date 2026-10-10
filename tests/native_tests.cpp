@@ -1,4 +1,5 @@
 #include "GameWindowMapper.h"
+#include "capture.h"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -12,7 +13,7 @@
 #include <vector>
 
 namespace {
-int checks=0,pixelChecksSkipped=0;
+int checks=0;
 void require(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error(message);}
 void pump(){MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}}
 bool until(const std::function<bool()>& f,int ms=8000){auto end=GetTickCount64()+ms;do{pump();if(f())return true;Sleep(20);}while(GetTickCount64()<end);return false;}
@@ -25,15 +26,44 @@ LRESULT CALLBACK sourceProc(HWND h,UINT m,WPARAM w,LPARAM l){
 HWND canvas(){
     HWND h=nullptr;while((h=FindWindowExW(nullptr,h,L"GameWindowMapper.Canvas.v1",nullptr))){DWORD pid=0;GetWindowThreadProcessId(h,&pid);if(pid==GetCurrentProcessId())return h;}return nullptr;
 }
-bool color(HWND h,int x,int y,COLORREF expected){
-    POINT point{x,y};ClientToScreen(h,&point);auto dc=GetDC(nullptr);auto actual=GetPixel(dc,point.x,point.y);ReleaseDC(nullptr,dc);
-    return actual!=CLR_INVALID&&abs(int(GetRValue(actual))-GetRValue(expected))<8&&
-        abs(int(GetGValue(actual))-GetGValue(expected))<8&&abs(int(GetBValue(actual))-GetBValue(expected))<8;
-}
-bool desktopReadable(){
-    auto dc=GetDC(nullptr);if(!dc)return false;
-    auto pixel=GetPixel(dc,0,0);ReleaseDC(nullptr,dc);return pixel!=CLR_INVALID;
-}
+struct Apartment {
+    HRESULT result{CoInitializeEx(nullptr,COINIT_MULTITHREADED)};
+    ~Apartment(){winrt::clear_factory_cache();if(SUCCEEDED(result))CoUninitialize();}
+};
+class CanvasProbe {
+    HWND surface_{CreateWindowExW(0,L"STATIC",L"GWM test readback target",WS_POPUP,
+        0,0,64,64,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr)};
+    std::unique_ptr<gwm::Graphics> graphics_;
+    std::unique_ptr<gwm::Capture> capture_;
+    winrt::com_ptr<ID3D11Texture2D> sample_;
+public:
+    explicit CanvasProbe(HWND canvas){
+        if(!surface_)throw std::runtime_error("create test readback target");
+        graphics_=std::make_unique<gwm::Graphics>(surface_);
+        capture_=std::make_unique<gwm::Capture>(canvas,*graphics_);
+        D3D11_TEXTURE2D_DESC desc{};desc.Width=desc.Height=desc.MipLevels=desc.ArraySize=1;
+        desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;
+        desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        winrt::check_hresult(graphics_->device->CreateTexture2D(&desc,nullptr,sample_.put()));
+    }
+    ~CanvasProbe(){capture_.reset();graphics_.reset();if(surface_)DestroyWindow(surface_);}
+    bool color(int x,int y,COLORREF expected){
+        capture_->update(*graphics_);
+        if(!capture_->texture||capture_->state!=GWM_LIVE)return false;
+        const int sx=capture_->clientOffset.x+x,sy=capture_->clientOffset.y+y;
+        D3D11_TEXTURE2D_DESC desc{};capture_->texture->GetDesc(&desc);
+        if(sx<0||sy<0||UINT(sx)>=desc.Width||UINT(sy)>=desc.Height)return false;
+        const D3D11_BOX box{UINT(sx),UINT(sy),0,UINT(sx+1),UINT(sy+1),1};
+        graphics_->context->CopySubresourceRegion(sample_.get(),0,0,0,0,capture_->texture.get(),0,&box);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        winrt::check_hresult(graphics_->context->Map(sample_.get(),0,D3D11_MAP_READ,0,&mapped));
+        const auto pixel=static_cast<const BYTE*>(mapped.pData);
+        const COLORREF actual=RGB(pixel[2],pixel[1],pixel[0]);
+        graphics_->context->Unmap(sample_.get(),0);
+        return abs(int(GetRValue(actual))-GetRValue(expected))<8&&
+            abs(int(GetGValue(actual))-GetGValue(expected))<8&&abs(int(GetBValue(actual))-GetBValue(expected))<8;
+    }
+};
 void integer(std::vector<uint8_t>& b,int32_t n){auto p=reinterpret_cast<uint8_t*>(&n);b.insert(b.end(),p,p+4);}
 std::vector<uint8_t> background(){
     BITMAPFILEHEADER file{};BITMAPINFOHEADER info{};
@@ -73,6 +103,7 @@ void exports(HMODULE dll){
 
 int wmain(int argc,wchar_t** argv){
     std::cout.setf(std::ios::unitbuf);
+    Apartment apartment;if(FAILED(apartment.result))return 1;
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     std::wstring path;
     if(argc>1)path=argv[1];else {wchar_t exe[MAX_PATH];GetModuleFileNameW(nullptr,exe,MAX_PATH);path=exe;path.resize(path.find_last_of(L"\\/")+1);path+=L"GameWindowMapper.dll";}
@@ -105,14 +136,17 @@ int wmain(int argc,wchar_t** argv){
             std::fill(std::begin(handles),std::end(handles),0);settings.clear();settings.shrink_to_fit();
             require(until([]{auto h=canvas();return h&&IsWindowVisible(h);}),"canvas visible");
             auto h=canvas();
-            if(desktopReadable()){
-            bool mapped=until([&]{return color(h,160,100,RGB(32,192,64))&&color(h,480,100,RGB(224,48,32));}); if(!mapped){POINT p{160,100};ClientToScreen(h,&p);auto dc=GetDC(nullptr);std::cerr<<"screen pixel="<<GetPixel(dc,p.x,p.y)<<" at "<<p.x<<","<<p.y<<" source="<<GetPixel(dc,80,100)<<" lastError="<<GetLastError()<<"\n";ReleaseDC(nullptr,dc);} require(mapped,"WGC pixels preserve copied array order");
-            if(cycle==0)require(until([&]{return color(h,480,320,RGB(32,64,192));}),"copied config forced BMP fallback");
+            {
+            // Read this HWND's actual GPU frame, independent of another app
+            // covering the canvas. CPU readback exists only in this test.
+            CanvasProbe probe(h);
+            require(until([&]{return probe.color(160,100,RGB(32,192,64))&&probe.color(480,100,RGB(224,48,32));}),"WGC pixels preserve copied array order");
+            if(cycle==0)require(until([&]{return probe.color(480,320,RGB(32,64,192));}),"copied config forced BMP fallback");
             else {
-                require(until([&]{return color(h,480,340,RGB(32,192,64));}),"raw image does not force live HWND to background");
-                if(cycle<3)require(until([&]{return color(h,160,320,RGB(32,64,192));}),"raw BMP/PNG fallback for invalid HWND");
+                require(until([&]{return probe.color(480,340,RGB(32,192,64));}),"raw image does not force live HWND to background");
+                if(cycle<3)require(until([&]{return probe.color(160,320,RGB(32,64,192));}),"raw BMP/PNG fallback for invalid HWND");
             }
-            }else{++pixelChecksSkipped;std::cout<<"NOT VERIFIED: desktop pixel access unavailable for cycle "<<cycle+1<<"\n";}
+            }
             // Drop host reference BEFORE close. DLL must stay alive until its
             // own threads and resources are gone, then unload without any API.
             // Keep the DLL loaded for both restarts, as E-language does.
@@ -124,7 +158,7 @@ int wmain(int argc,wchar_t** argv){
             require(IsWindow(a)&&IsWindow(b),"source windows survive");
             std::cout<<"cycle "<<cycle+1<<": "<<(cycle==0?"packed config":cycle==1?"raw BMP":cycle==2?"raw PNG":"user JPEG")<<", canvas created, close, "<<(cycle<3?"host keeps DLL loaded":"automatic unload")<<" OK\n";
         }
-        std::cout<<"PASS "<<checks<<" lifecycle/config checks; four close/reopen cycles, no Stop call; pixel cycles skipped="<<pixelChecksSkipped<<"\n";
+        std::cout<<"PASS "<<checks<<" lifecycle/config checks; four close/reopen cycles, no Stop call; GPU canvas pixels verified\n";
     }catch(const std::exception& e){
         if(auto h=canvas()){PostMessageW(h,WM_CLOSE,0,0);until([]{return !canvas();});}
         if(dll)FreeLibrary(dll);

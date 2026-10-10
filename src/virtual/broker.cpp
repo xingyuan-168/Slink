@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <system_error>
@@ -94,8 +95,8 @@ public:
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tokenValue)) fail(GetLastError());
         Handle token(tokenValue); user = tokenSid(token.get(), false);
         if (!ProcessIdToSessionId(GetCurrentProcessId(), &session)) fail(GetLastError());
-        const auto logonDacl = L"D:P(A;;GA;;;SY)(A;;GA;;;" + logon + L")";
-        const auto userDacl = L"D:P(A;;GA;;;SY)(A;;GA;;;" + user + L")";
+        const auto logonDacl = L"O:" + user + L"D:P(A;;GA;;;SY)(A;;GA;;;" + logon + L")";
+        const auto userDacl = L"O:" + user + L"D:P(A;;GA;;;SY)(A;;GA;;;" + user + L")";
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(logonDacl.c_str(), SDDL_REVISION_1, &logonDescriptor_, nullptr) ||
             !ConvertStringSecurityDescriptorToSecurityDescriptorW(userDacl.c_str(), SDDL_REVISION_1, &userDescriptor_, nullptr)) fail(GetLastError());
     }
@@ -352,7 +353,7 @@ public:
     DWORD run() {
         auto attributes = security_.attributes();
         Handle mutex(CreateMutexW(&attributes, FALSE, (ipc::BrokerMutexName() + suffix()).c_str()));
-        if (!mutex) return GetLastError();
+        if (!mutex) { const DWORD error = GetLastError(); journal_.log(L"broker mutex creation failed", error); return error; }
         if (GetLastError() == ERROR_ALREADY_EXISTS) return ERROR_SUCCESS;
         worker_ = std::thread([this] { work(); });
         DWORD finalError{};
@@ -382,14 +383,20 @@ public:
                 peer = security_.peer(clientPid);
                 if (request.operation == ipc::Operation::Ping || request.operation == ipc::Operation::State) reply = state(peer->identity, request.operation == ipc::Operation::State);
                 else reply = submit(*peer, request);
-            } catch (const std::system_error& error) { reply.error = DWORD(error.code().value()); reply.state = ipc::State::Unavailable; assignMessage(reply, L"恢复服务拒绝了无效或未授权的请求"); }
+            } catch (const std::system_error& error) { reply.error = DWORD(error.code().value()); reply.state = ipc::State::Unavailable; assignMessage(reply, L"恢复服务拒绝了无效或未授权的请求"); journal_.log(L"request identity or format rejected", reply.error); }
             catch (...) { reply.error = ERROR_UNHANDLED_EXCEPTION; reply.state = ipc::State::Unavailable; }
-            if (transfer(pipe.get(), reply, true) && peer && request.operation == ipc::Operation::Release && reply.error == 0 && reply.remaining == 0) {
+            // DisconnectNamedPipe discards unread data. Wait for a bounded client
+            // acknowledgement rather than using an unbounded FlushFileBuffers.
+            uint32_t acknowledged{};
+            const bool delivered = transfer(pipe.get(), reply, true) && transfer(pipe.get(), acknowledged, false) &&
+                acknowledged == ipc::ReplyAcknowledged;
+            if (delivered && peer && request.operation == ipc::Operation::Release && reply.error == 0 && reply.remaining == 0) {
                 std::scoped_lock lock(stateMutex_); emptySince_ = GetTickCount64();
             }
             DisconnectNamedPipe(pipe.get());
         }
         if (finalError) {
+            journal_.log(L"broker pipe loop failed; restoring sessions before exit", finalError);
             // Keep the controller alive long enough to restore owned windows even
             // if transport creation fails. No source state is discarded here.
             while (!exitReady_) Sleep(50);
@@ -484,7 +491,7 @@ private:
     }
     ipc::Reply state(const SessionIdentity& identity, bool requireLease = false) {
         std::scoped_lock lock(stateMutex_); ipc::Reply reply;
-        reply.state = globalState_; reply.error = display_.code; reply.installed = display_.installed; reply.active = display_.active;
+        reply.state = globalState_; reply.statusError = display_.code; reply.installed = display_.installed; reply.active = display_.active;
         reply.left = display_.bounds.left; reply.top = display_.bounds.top; reply.right = display_.bounds.right; reply.bottom = display_.bounds.bottom;
         assignMessage(reply, display_.message);
         const auto lease = findLease(identity);
