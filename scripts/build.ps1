@@ -1,6 +1,7 @@
 param(
     [switch]$Test,
     [switch]$X64Source,
+    [switch]$X64Helper,
     [string]$CMakePath
 )
 $ErrorActionPreference = 'Stop'
@@ -20,10 +21,19 @@ if (-not $CMakePath) {
 if (-not $CMakePath -or -not (Test-Path -LiteralPath $CMakePath)) {
     throw 'CMake >= 3.25 is required. Install it or pass -CMakePath. Also install MSVC 2022 C++ and Windows SDK 10.0.18362+.'
 }
-if ($Test -and $X64Source) { throw '-Test applies to the x86 DLL build; x64-source is a capture target only.' }
-$taskPreset = if ($X64Source) { 'x64-source' } else { 'x86' }
+if ($X64Source -and $X64Helper) { throw 'Choose only one of -X64Source and -X64Helper.' }
+if ($Test -and ($X64Source -or $X64Helper)) { throw '-Test applies to the x86 DLL build.' }
+$taskPreset = if ($X64Source) { 'x64-source' } elseif ($X64Helper) { 'x64-helper' } else { 'x86' }
 Push-Location $taskRoot
 try {
+    if (-not $X64Source) {
+        & (Join-Path $PSScriptRoot 'fetch-driver.ps1') | Out-Host
+        & $CMakePath --preset x64-helper
+        if ($LASTEXITCODE -ne 0) { throw 'x64 helper configure failed' }
+        & $CMakePath --build --preset x64-helper-release --target gwm_recovery driver_probe --parallel
+        if ($LASTEXITCODE -ne 0) { throw 'x64 helper build failed' }
+        if ($X64Helper) { return }
+    }
     & $CMakePath --preset $taskPreset
     if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
     if ($X64Source) { & $CMakePath --build --preset "$taskPreset-release" --target dynamic_source --parallel }
