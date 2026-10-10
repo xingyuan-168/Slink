@@ -209,7 +209,9 @@ std::vector<BYTE> encode(const Security& security, const JournalData& data) {
     out.u32(static_cast<uint32_t>(data.leases.size())); out.u32(static_cast<uint32_t>(data.records.size()));
     for (const auto& lease : data.leases) { out.session(lease.identity); out.u32(static_cast<uint32_t>(lease.allowed.size())); for (auto window : lease.allowed) out.u64(window); }
     for (const auto& record : data.records) {
-        out.u32(record.version); out.session(record.session); out.u64(record.window);
+        out.u32(record.version);
+        if (record.version >= 2) out.u32(uint32_t(record.purpose));
+        out.session(record.session); out.u64(record.window);
         out.u32(record.sourceProcessId); out.u32(record.sourceThreadId); out.u64(record.sourceCreationTime);
         out.u32(record.windowClassAtom); out.u32(record.lifecycleCookie);
         out.u32(record.originalPlacement.flags); out.u32(record.originalPlacement.showCmd);
@@ -237,7 +239,13 @@ JournalData decode(const Security& security, std::span<const BYTE> bytes) {
         data.leases.push_back(std::move(lease));
     }
     for (uint32_t index = 0; index < recordCount; ++index) {
-        ParkingRecord record; record.version = in.u32(); record.session = in.session(); record.window = in.u64();
+        ParkingRecord record; record.version = in.u32();
+        if (record.version != 1 && record.version != 2) fail(ERROR_INVALID_DATA);
+        if (record.version == 2) {
+            const auto purpose = in.u32(); if (purpose > uint32_t(RecordPurpose::DisplayTransition)) fail(ERROR_INVALID_DATA);
+            record.purpose = RecordPurpose(purpose);
+        }
+        record.session = in.session(); record.window = in.u64();
         record.sourceProcessId = in.u32(); record.sourceThreadId = in.u32(); record.sourceCreationTime = in.u64();
         record.windowClassAtom = in.u32(); record.lifecycleCookie = in.u32();
         record.originalPlacement.length = sizeof(WINDOWPLACEMENT);
@@ -444,7 +452,10 @@ private:
     }
     auto findLease(const SessionIdentity& identity) { return std::find_if(leases_.begin(), leases_.end(), [&](const Lease& lease) { return lease.data.identity == identity; }); }
     bool hasLeases() { std::scoped_lock lock(stateMutex_); return !leases_.empty(); }
-    bool hasRecords() { std::scoped_lock lock(stateMutex_); return !cachedRecords_.empty(); }
+    bool hasHiddenRecords() {
+        std::scoped_lock lock(stateMutex_);
+        return std::any_of(cachedRecords_.begin(), cachedRecords_.end(), [](const ParkingRecord& record) { return record.purpose == RecordPurpose::Hidden; });
+    }
     DisplayResult inspect() { return options_.inspect ? options_.inspect() : InspectOwnedDisplay(); }
     DisplayResult ensure(int width, int height, const PhaseCallback& callback) { return options_.ensure ? options_.ensure(width, height, callback) : EnsureExtendedDisplay(width, height, callback); }
     DisplayResult detach() { return options_.detach ? options_.detach() : DetachOwnedDisplay(); }
@@ -501,13 +512,13 @@ private:
         assignMessage(reply, display_.message);
         const auto lease = findLease(identity);
         if (lease != leases_.end()) {
-            if (lease->closing) reply.state = lease->error ? ipc::State::RestoreFailed : ipc::State::Restoring;
+            if (lease->closing) reply.state = lease->error && !initRunning_ ? ipc::State::RestoreFailed : ipc::State::Restoring;
             if (lease->error) reply.error = lease->error;
             if (!lease->message.empty()) assignMessage(reply, lease->message);
             reply.parkingCode = uint32_t(lease->parkingCode);
             for (const auto& record : cachedRecords_) if (record.session == identity) {
                 ++reply.remaining;
-                if (reply.hiddenCount < ipc::MaxWindows) reply.hidden[reply.hiddenCount++] = record.window;
+                if (record.purpose == RecordPurpose::Hidden && reply.hiddenCount < ipc::MaxWindows) reply.hidden[reply.hiddenCount++] = record.window;
             }
         } else if (std::find(completed_.begin(), completed_.end(), identity) != completed_.end()) {
             reply = {}; reply.state = ipc::State::Stopped; assignMessage(reply, L"本次窗口已恢复");
@@ -596,6 +607,11 @@ private:
             std::scoped_lock lock(stateMutex_); const auto lease = findLease(identity); if (lease == leases_.end()) return;
             lease->closing = true; lease->error = 0; lease->message = L"正在恢复本次隐藏的窗口";
         }
+        // An in-flight display change can still relocate checkpointed windows.
+        // Keep its lease/journal until initialization has settled and restored it.
+        // This executed attempt is retryable, not a pending Job completion:
+        // caching IO_PENDING here would replay it forever for the same requestId.
+        if (initRunning_) { leaseResult(identity, ERROR_BUSY, L"正在等待显示器初始化结束，再确认窗口恢复"); return; }
         const auto report = parking_.restoreSession(identity); refreshRecords();
         if (!report.complete()) {
             DWORD error = ERROR_BUSY; ParkingCode code = ParkingCode::restoreFailed;
@@ -637,26 +653,47 @@ private:
         { std::scoped_lock lock(stateMutex_); initStarted_ = GetTickCount64(); globalState_ = ipc::State::Checking; display_.code = 0; display_.message = L"正在检查虚拟显示器"; displayTouched_ = true; detached_ = false; }
         initializer_ = std::thread([this] {
             const auto previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            DisplayResult value;
             try {
                 const auto callback = [this](Phase value, const std::wstring& message) { phase(value, message); };
-                auto value = inspect();
+                value = inspect();
                 const bool newInstall = !value.installed && value.code == ERROR_NOT_FOUND;
-                if (value.code == ERROR_ALREADY_EXISTS) setDisplay(value);
-                else {
+                if (!value.active && value.code != ERROR_ALREADY_EXISTS) {
+                    std::vector<LeaseData> hosts;
+                    { std::scoped_lock lock(stateMutex_); for (const auto& lease : leases_) hosts.push_back(lease.data); }
+                    // Windows can put a previously restored window back on a
+                    // reconnected monitor. Save whitelisted source placements
+                    // durably before changing topology, never arbitrary HWNDs.
+                    for (const auto& host : hosts) for (const auto raw : host.allowed) {
+                        const auto saved = parking_.checkpoint(host.identity, reinterpret_cast<HWND>(uintptr_t(raw)));
+                        if (!saved && saved.code != ParkingCode::sourceUnavailable && saved.code != ParkingCode::unsupportedWindow &&
+                            saved.code != ParkingCode::fullscreenUnsupported && saved.code != ParkingCode::ownedByAnotherSession)
+                            fail(errorFor(saved));
+                    }
+                    refreshRecords();
+                }
+                if (value.code != ERROR_ALREADY_EXISTS) {
                     if (!value || !value.installed) value = install(callback);
-                    if (!value || value.rebootRequired) setDisplay(value);
-                    else {
-                        if (newInstall && !hasRecords()) {
+                    if (value && !value.rebootRequired) {
+                        if (newInstall && !hasHiddenRecords()) {
                             value = detach();
-                            if (!value && value.code != ERROR_NOT_FOUND) { setDisplay(value); initRunning_ = false; if (previous) SetThreadDpiAwarenessContext(previous); return; }
                         }
-                        if (hasLeases()) value = ensure(1920, 1080, callback);
-                        else value = inspect();
-                        setDisplay(value);
+                        if (value || value.code == ERROR_NOT_FOUND) {
+                            if (hasLeases()) value = ensure(1920, 1080, callback);
+                            else value = inspect();
+                        }
                     }
                 }
-            } catch (const std::system_error& error) { setDisplay({DWORD(error.code().value()), L"虚拟显示器初始化失败"}); }
-            catch (...) { setDisplay({ERROR_UNHANDLED_EXCEPTION, L"虚拟显示器初始化失败"}); }
+            } catch (const std::system_error& error) { value = {DWORD(error.code().value()), L"虚拟显示器初始化失败"}; }
+            catch (...) { value = {ERROR_UNHANDLED_EXCEPTION, L"虚拟显示器初始化失败"}; }
+            // Cancellation/install failure must also finish or retain every
+            // checkpoint; ordinary mapping stays available on failure.
+            try {
+                if (!parking_.restoreCheckpoints().complete()) {
+                    value.code = ERROR_BUSY; value.message = L"初始化后的窗口恢复尚未完成，记录已保留，请重试";
+                    refreshRecords(); setDisplay(value, ipc::State::RestoreFailed);
+                } else { refreshRecords(); setDisplay(value); }
+            } catch (...) { setDisplay({ERROR_UNHANDLED_EXCEPTION, L"初始化后的窗口恢复未完成，记录已保留"}, ipc::State::RestoreFailed); }
             if (previous) SetThreadDpiAwarenessContext(previous);
             initRunning_ = false; queueChanged_.notify_all();
         });
@@ -667,6 +704,9 @@ private:
             if (lease == leases_.end()) fail(ERROR_NOT_FOUND);
             if (!request.window || request.window > UINTPTR_MAX || std::find(lease->data.allowed.begin(), lease->data.allowed.end(), request.window) == lease->data.allowed.end()) fail(ERROR_ACCESS_DENIED);
             if (lease->closing) fail(ERROR_BUSY);
+            // Show must not clear a checkpoint while a topology change can
+            // still move that HWND. Hide already requires the same readiness.
+            if (initRunning_) fail(ERROR_NOT_READY);
         }
         const HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(request.window));
         ParkingResult result;

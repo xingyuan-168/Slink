@@ -37,8 +37,11 @@ struct ParkingResult {
 // Persist fields explicitly in a versioned journal; this is not a packed wire ABI.
 // The property cookie is a 32-bit value so the same record protects x86/x64 HWNDs.
 // The journal must be ACL restricted to the current user and validated on import.
+enum class RecordPurpose : uint32_t { Hidden, DisplayTransition };
+
 struct ParkingRecord {
-    uint32_t version{1};
+    uint32_t version{2};
+    RecordPurpose purpose{RecordPurpose::Hidden};
     SessionIdentity session{};
     uint64_t window{};
     uint32_t sourceProcessId{};
@@ -90,6 +93,11 @@ public:
     // Controller must prove this is its owned active virtual display. Bounds must
     // be wholly contained in one currently active monitor, never off-desktop.
     ParkingResult hide(const SessionIdentity& session, HWND window, const RECT& virtualBounds);
+    // Save a whitelisted visible window before enabling an inactive display.
+    // These durable checkpoints are not hidden-window records. Complete them
+    // after the display change, and retain failed restores for normal recovery.
+    ParkingResult checkpoint(const SessionIdentity& session, HWND window);
+    RestoreReport restoreCheckpoints();
     ParkingResult show(const SessionIdentity& session, HWND window);
     RestoreReport restoreSession(const SessionIdentity& session);
     RestoreReport restoreAll();

@@ -101,7 +101,7 @@ void CanvasController::run() noexcept {
                 auto reply = client.release();
                 if (!reply.error && !reply.remaining) { possibleLease = false; finished(); break; }
                 const bool accepted = reply.state == ipc::State::Restoring || reply.state == ipc::State::RestoreFailed;
-                if (reply.error == ERROR_IO_PENDING) reply.state = ipc::State::Restoring;
+                if (reply.error == ERROR_IO_PENDING || (reply.error == ERROR_BUSY && reply.state == ipc::State::Restoring)) reply.state = ipc::State::Restoring;
                 else reply.state = ipc::State::RestoreFailed;
                 if (!reply.message[0]) wcscpy_s(reply.message, L"尚未确认全部恢复，记录已保留，请重试恢复");
                 publish(reply);

@@ -184,14 +184,14 @@ bool responsive(HWND window, ULONGLONG deadline) {
 // Require stable observations and a responsive target; a queued async request
 // alone is never sufficient to forget the restoration record.
 template<class Predicate>
-bool awaitWindow(const ParkingRecord& record, ULONGLONG deadline, Predicate predicate) {
+bool awaitWindow(const ParkingRecord& record, ULONGLONG deadline, Predicate predicate, DWORD stableMs = 80) {
     ULONGLONG stableSince{};
     do {
         DWORD ignored{};
         if (identify(record, ignored) != Identity::same) return false;
         if (predicate()) {
             if (!stableSince) stableSince = GetTickCount64();
-            if (GetTickCount64() - stableSince >= 80 && responsive(windowHandle(record.window), deadline)) return true;
+            if (GetTickCount64() - stableSince >= stableMs && responsive(windowHandle(record.window), deadline)) return true;
         } else stableSince = 0;
         const DWORD remaining = remainingTime(deadline);
         if (!remaining) break;
@@ -200,14 +200,17 @@ bool awaitWindow(const ParkingRecord& record, ULONGLONG deadline, Predicate pred
     return false;
 }
 bool validRecord(const ParkingRecord& record) {
-    return record.version == 1 && record.session.processId && record.session.creationTime &&
+    return (record.version == 1 || record.version == 2) &&
+        (record.purpose == RecordPurpose::Hidden || (record.version == 2 && record.purpose == RecordPurpose::DisplayTransition)) &&
+        record.session.processId && record.session.creationTime &&
         record.window && record.window <= UINTPTR_MAX && record.sourceProcessId &&
         record.sourceThreadId && record.sourceCreationTime && record.windowClassAtom && record.lifecycleCookie &&
         record.originalPlacement.length == sizeof(WINDOWPLACEMENT) &&
         (record.originalPlacement.showCmd == SW_SHOWNORMAL || record.originalPlacement.showCmd == SW_SHOWMAXIMIZED ||
             record.originalPlacement.showCmd == SW_SHOWMINIMIZED) &&
         positive(record.originalPlacement.rcNormalPosition) && positive(record.originalRect) &&
-        positive(record.originalMonitorRect) && positive(record.originalWorkRect) && positive(record.virtualBounds) &&
+        positive(record.originalMonitorRect) && positive(record.originalWorkRect) &&
+        (record.purpose == RecordPurpose::DisplayTransition || positive(record.virtualBounds)) &&
         std::wmemchr(record.originalMonitorName, 0, std::size(record.originalMonitorName)) &&
         std::wmemchr(record.originalMonitorIdentity, 0, std::size(record.originalMonitorIdentity)) &&
         std::wmemchr(record.virtualMonitorName, 0, std::size(record.virtualMonitorName)) &&
@@ -258,6 +261,74 @@ struct WindowParking::Impl {
             windowHandle(record.window), identityError, true);
         return result(apiFailure(error, code), windowHandle(record.window), error, true);
     }
+    ParkingResult remember(const SessionIdentity& session, HWND window, const RECT& bounds, RecordPurpose purpose) {
+        if (!alive(session)) return result(ParkingCode::invalidSession, window);
+        const bool checkpoint = purpose == RecordPurpose::DisplayTransition;
+        if (!window || (!checkpoint && !positive(bounds))) return result(ParkingCode::invalidArgument, window);
+        const auto existing = findRecord(window);
+        if (existing != records.end()) {
+            DWORD error{};
+            const auto identity = identify(*existing, error);
+            if (identity == Identity::gone) {
+                const auto removed = forget(window, ParkingCode::sourceGone);
+                if (!removed) return removed;
+            } else {
+                if (identity == Identity::unverifiable) return result(ParkingCode::identityUnverifiable, window, error, true);
+                return result(existing->session == session ? ParkingCode::alreadyHidden : ParkingCode::ownedByAnotherSession, window, 0, true);
+            }
+        }
+        if (!IsWindow(window)) return result(ParkingCode::sourceUnavailable, window, ERROR_INVALID_WINDOW_HANDLE);
+        if (!topLevelMovable(window)) return result(ParkingCode::unsupportedWindow, window);
+        Monitor target;
+        if (!checkpoint) {
+            target = readMonitor(MonitorFromRect(&bounds, MONITOR_DEFAULTTONULL));
+            if (!target.handle || !contains(target.info.rcMonitor, bounds)) return result(ParkingCode::targetUnavailable, window);
+        }
+        if (GetPropW(window, kCookieProperty)) return result(ParkingCode::ownedByAnotherSession, window);
+        ParkingRecord record; record.purpose = purpose; record.session = session;
+        record.window = windowValue(window); record.virtualBounds = bounds;
+        if (target.handle) {
+            wcscpy_s(record.virtualMonitorName, target.info.szDevice);
+            wcsncpy_s(record.virtualMonitorIdentity, target.identity.c_str(), _TRUNCATE);
+        }
+        DWORD pid{};
+        record.sourceThreadId = GetWindowThreadProcessId(window, &pid); record.sourceProcessId = pid;
+        Handle source(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+        if (!source.get() || !creationTime(source.get(), record.sourceCreationTime)) {
+            const auto error = GetLastError(); return result(apiFailure(error, ParkingCode::identityUnverifiable), window, error);
+        }
+        record.windowClassAtom = static_cast<uint32_t>(GetClassLongPtrW(window, GCW_ATOM));
+        if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&record.lifecycleCookie), sizeof(record.lifecycleCookie), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+            return result(ParkingCode::moveFailed, window, ERROR_GEN_FAILURE);
+        if (!record.lifecycleCookie) record.lifecycleCookie = 1;
+        records.reserve(records.size() + 1);
+        if (!SetPropW(window, kCookieProperty, reinterpret_cast<HANDLE>(static_cast<uintptr_t>(record.lifecycleCookie)))) {
+            const auto error = GetLastError(); return result(apiFailure(error, ParkingCode::moveFailed), window, error);
+        }
+        CookieGuard cookieGuard(window, record.lifecycleCookie);
+        record.originalPlacement.length = sizeof(record.originalPlacement);
+        if (!GetWindowPlacement(window, &record.originalPlacement) || !GetWindowRect(window, &record.originalRect))
+            return result(ParkingCode::sourceUnavailable, window, GetLastError());
+        const auto origin = readMonitor(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST));
+        if (!origin.handle) return result(ParkingCode::targetUnavailable, window);
+        if (fullscreenLike(window, record.originalRect, origin)) return result(ParkingCode::fullscreenUnsupported, window);
+        record.originalMonitorRect = origin.info.rcMonitor; record.originalWorkRect = origin.info.rcWork;
+        wcscpy_s(record.originalMonitorName, origin.info.szDevice);
+        wcsncpy_s(record.originalMonitorIdentity, origin.identity.c_str(), _TRUNCATE);
+        record.originalDpi = GetDpiForWindow(window);
+        record.toolWindow = (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0;
+        const RECT normal = record.originalPlacement.showCmd == SW_SHOWNORMAL ? record.originalRect :
+            workspaceToScreen(record.originalPlacement.rcNormalPosition, record.originalMonitorRect, record.originalWorkRect, record.toolWindow);
+        if (!positive(normal)) return result(ParkingCode::unsupportedWindow, window);
+        if (!checkpoint && (normal.right - normal.left > bounds.right - bounds.left || normal.bottom - normal.top > bounds.bottom - bounds.top))
+            return result(ParkingCode::targetTooSmall, window);
+        DWORD error{};
+        if (identify(record, error) != Identity::same) return result(ParkingCode::sourceUnavailable, window, error);
+        records.push_back(record);
+        if (!persist(records)) { records.pop_back(); return result(ParkingCode::persistenceFailed, window, ERROR_WRITE_FAULT); }
+        cookieGuard.retained = true;
+        return result(ParkingCode::ok, window, 0, true);
+    }
     ParkingResult restore(HWND window) {
         const auto entry = findRecord(window);
         if (entry == records.end()) return result(ParkingCode::notHidden, window);
@@ -305,15 +376,26 @@ struct WindowParking::Impl {
         else if (placement.showCmd == SW_SHOWMINIMIZED) placement.showCmd = SW_SHOWMINNOACTIVE;
 
         const ULONGLONG deadline = GetTickCount64() + options.operationTimeoutMs;
-        SetLastError(ERROR_SUCCESS);
-        if (!SetWindowPlacement(window, &placement)) return verifyFailure(record, ParkingCode::restoreFailed, GetLastError());
-        const bool stateRestored = awaitWindow(record, deadline, [&] {
+        const auto stateMatches = [&] {
             if (record.originalPlacement.showCmd == SW_SHOWMINIMIZED) return IsIconic(window) != FALSE;
             if (record.originalPlacement.showCmd == SW_SHOWMAXIMIZED) return IsZoomed(window) != FALSE &&
                 MonitorFromWindow(window, MONITOR_DEFAULTTONULL) == target->handle;
             RECT actual{};
             return !IsIconic(window) && !IsZoomed(window) && GetWindowRect(window, &actual) && sameRect(actual, expected);
-        });
+        };
+        const auto checkpointMatches = [&] {
+            WINDOWPLACEMENT actual{}; actual.length = sizeof(actual);
+            return stateMatches() && GetWindowPlacement(window, &actual) && sameRect(actual.rcNormalPosition, placement.rcNormalPosition, 2);
+        };
+        // An unchanged checkpoint needs verification, not a show operation that
+        // could activate a maximized source during ordinary canvas startup.
+        if (record.purpose == RecordPurpose::DisplayTransition && checkpointMatches() &&
+            awaitWindow(record, std::min<ULONGLONG>(deadline, GetTickCount64() + 350), checkpointMatches, 300))
+            return forget(window, ParkingCode::ok);
+        SetLastError(ERROR_SUCCESS);
+        if (!SetWindowPlacement(window, &placement)) return verifyFailure(record, ParkingCode::restoreFailed, GetLastError());
+        const bool stateRestored = awaitWindow(record, deadline, stateMatches,
+            record.purpose == RecordPurpose::DisplayTransition ? 300 : 80);
         if (!stateRestored) return verifyFailure(record, ParkingCode::restoreFailed, ERROR_TIMEOUT);
 
         // A minimized HWND's current RECT is an icon position, so verify the
@@ -323,13 +405,15 @@ struct WindowParking::Impl {
             return verifyFailure(record, ParkingCode::restoreFailed, ERROR_INVALID_DATA);
         return forget(window, ParkingCode::ok);
     }
-    RestoreReport restoreSelected(const SessionIdentity* session, bool exitedOnly) {
+    RestoreReport restoreSelected(const SessionIdentity* session, bool exitedOnly, bool checkpointsOnly = false) {
         RestoreReport report;
         std::vector<HWND> targets;
-        for (const auto& entry : records) if ((!session || entry.session == *session) && (!exitedOnly || !alive(entry.session)))
+        for (const auto& entry : records) if ((!session || entry.session == *session) && (!exitedOnly || !alive(entry.session)) &&
+            (!checkpointsOnly || entry.purpose == RecordPurpose::DisplayTransition))
             targets.push_back(windowHandle(entry.window));
         for (const auto window : targets) report.results.push_back(restore(window));
-        for (const auto& entry : records) if ((!session || entry.session == *session) && (!exitedOnly || !alive(entry.session))) ++report.remaining;
+        for (const auto& entry : records) if ((!session || entry.session == *session) && (!exitedOnly || !alive(entry.session)) &&
+            (!checkpointsOnly || entry.purpose == RecordPurpose::DisplayTransition)) ++report.remaining;
         return report;
     }
 };
@@ -365,74 +449,20 @@ bool WindowParking::sessionAlive(const SessionIdentity& session) const {
 ParkingResult WindowParking::hide(const SessionIdentity& session, HWND window, const RECT& bounds) {
     std::scoped_lock lock(impl_->mutex);
     PhysicalCoordinates coordinates;
-    if (!impl_->alive(session)) return result(ParkingCode::invalidSession, window);
-    if (!window || !positive(bounds)) return result(ParkingCode::invalidArgument, window);
-    const auto existing = impl_->findRecord(window);
-    if (existing != impl_->records.end()) {
-        DWORD error{};
-        const auto identity = identify(*existing, error);
-        if (identity == Identity::gone) {
-            auto removed = impl_->forget(window, ParkingCode::sourceGone);
-            if (!removed) return removed;
-        } else {
-            if (identity == Identity::unverifiable) return result(ParkingCode::identityUnverifiable, window, error, true);
-            return result(existing->session == session ? ParkingCode::alreadyHidden : ParkingCode::ownedByAnotherSession, window, 0, true);
-        }
-    }
-    if (!IsWindow(window)) return result(ParkingCode::sourceUnavailable, window, ERROR_INVALID_WINDOW_HANDLE);
-    if (!topLevelMovable(window)) return result(ParkingCode::unsupportedWindow, window);
+    const auto remembered = impl_->remember(session, window, bounds, RecordPurpose::Hidden);
+    if (!remembered || remembered.code != ParkingCode::ok) return remembered;
+    const ParkingRecord record = *impl_->findRecord(window);
     const auto target = readMonitor(MonitorFromRect(&bounds, MONITOR_DEFAULTTONULL));
-    if (!target.handle || !contains(target.info.rcMonitor, bounds)) return result(ParkingCode::targetUnavailable, window);
-    if (GetPropW(window, kCookieProperty)) return result(ParkingCode::ownedByAnotherSession, window);
-
-    ParkingRecord record; record.session = session; record.window = windowValue(window); record.virtualBounds = bounds;
-    wcscpy_s(record.virtualMonitorName, target.info.szDevice);
-    wcsncpy_s(record.virtualMonitorIdentity, target.identity.c_str(), _TRUNCATE);
-    DWORD sourceProcessId{};
-    record.sourceThreadId = GetWindowThreadProcessId(window, &sourceProcessId);
-    record.sourceProcessId = sourceProcessId;
-    Handle source(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, record.sourceProcessId));
-    if (!source.get() || !creationTime(source.get(), record.sourceCreationTime)) {
-        const auto error = GetLastError(); return result(apiFailure(error, ParkingCode::identityUnverifiable), window, error);
+    if (!target.handle || !contains(target.info.rcMonitor, bounds)) {
+        const auto restored = impl_->restore(window);
+        return result(ParkingCode::targetUnavailable, window, ERROR_NOT_READY, !restored || restored.recordRetained);
     }
-    record.windowClassAtom = static_cast<uint32_t>(GetClassLongPtrW(window, GCW_ATOM));
-    if (BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(&record.lifecycleCookie), sizeof(record.lifecycleCookie),
-        BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0) return result(ParkingCode::moveFailed, window, ERROR_GEN_FAILURE);
-    if (!record.lifecycleCookie) record.lifecycleCookie = 1;
-    // Mark this lifetime before collecting coordinates. Marking afterwards
-    // could accidentally attach an old window's placement to a recycled HWND.
-    impl_->records.reserve(impl_->records.size() + 1);
-    if (!SetPropW(window, kCookieProperty, reinterpret_cast<HANDLE>(static_cast<uintptr_t>(record.lifecycleCookie)))) {
-        const auto error = GetLastError(); return result(apiFailure(error, ParkingCode::moveFailed), window, error);
-    }
-    CookieGuard cookieGuard(window, record.lifecycleCookie);
-    record.originalPlacement.length = sizeof(record.originalPlacement);
-    if (!GetWindowPlacement(window, &record.originalPlacement) || !GetWindowRect(window, &record.originalRect))
-        return result(ParkingCode::sourceUnavailable, window, GetLastError());
-    const auto origin = readMonitor(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST));
-    if (!origin.handle) return result(ParkingCode::targetUnavailable, window);
-    if (fullscreenLike(window, record.originalRect, origin)) return result(ParkingCode::fullscreenUnsupported, window);
-    record.originalMonitorRect = origin.info.rcMonitor; record.originalWorkRect = origin.info.rcWork;
-    wcscpy_s(record.originalMonitorName, origin.info.szDevice);
-    wcsncpy_s(record.originalMonitorIdentity, origin.identity.c_str(), _TRUNCATE);
-    record.originalDpi = GetDpiForWindow(window);
-    record.toolWindow = (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0;
     const RECT normal = record.originalPlacement.showCmd == SW_SHOWNORMAL ? record.originalRect :
         workspaceToScreen(record.originalPlacement.rcNormalPosition, record.originalMonitorRect, record.originalWorkRect, record.toolWindow);
-    if (!positive(normal)) return result(ParkingCode::unsupportedWindow, window);
     const LONG width = normal.right - normal.left, height = normal.bottom - normal.top;
-    if (width > bounds.right - bounds.left || height > bounds.bottom - bounds.top) return result(ParkingCode::targetTooSmall, window);
     RECT parked{bounds.left + (bounds.right - bounds.left - width) / 2,
         bounds.top + (bounds.bottom - bounds.top - height) / 2, 0, 0};
     parked.right = parked.left + width; parked.bottom = parked.top + height;
-    DWORD identityError{};
-    if (identify(record, identityError) != Identity::same) return result(ParkingCode::sourceUnavailable, window, identityError);
-    impl_->records.push_back(record);
-    if (!impl_->persist(impl_->records)) {
-        impl_->records.pop_back();
-        return result(ParkingCode::persistenceFailed, window, ERROR_WRITE_FAULT);
-    }
-    cookieGuard.retained = true;
 
     const ULONGLONG deadline = GetTickCount64() + impl_->options.operationTimeoutMs;
     // SetWindowPlacement uses workspace coordinates and can restore a minimized
@@ -469,6 +499,15 @@ ParkingResult WindowParking::hide(const SessionIdentity& session, HWND window, c
     return result(apiFailure(moveError, ParkingCode::moveFailed), window, moveError, !restored || restored.recordRetained);
 }
 
+ParkingResult WindowParking::checkpoint(const SessionIdentity& session, HWND window) {
+    std::scoped_lock lock(impl_->mutex); PhysicalCoordinates coordinates;
+    return impl_->remember(session, window, {}, RecordPurpose::DisplayTransition);
+}
+RestoreReport WindowParking::restoreCheckpoints() {
+    std::scoped_lock lock(impl_->mutex); PhysicalCoordinates coordinates;
+    return impl_->restoreSelected(nullptr, false, true);
+}
+
 ParkingResult WindowParking::show(const SessionIdentity& session, HWND window) {
     std::scoped_lock lock(impl_->mutex); PhysicalCoordinates coordinates;
     const auto entry = impl_->findRecord(window);
@@ -491,7 +530,7 @@ RestoreReport WindowParking::restoreExitedSessions() {
 bool WindowParking::isHidden(HWND window) const {
     std::scoped_lock lock(impl_->mutex);
     const auto entry = impl_->findRecord(window); DWORD ignored{};
-    return entry != impl_->records.end() && identify(*entry, ignored) != Identity::gone;
+    return entry != impl_->records.end() && entry->purpose == RecordPurpose::Hidden && identify(*entry, ignored) != Identity::gone;
 }
 bool WindowParking::owns(const SessionIdentity& session, HWND window) const {
     std::scoped_lock lock(impl_->mutex);

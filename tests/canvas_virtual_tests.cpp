@@ -68,7 +68,9 @@ int wmain(int argc,wchar_t** argv){
         require(until([&]{const auto button=GetDlgItem(canvas(),gwm::vd::ui::Retry);return at(second,originalB)&&button&&IsWindowVisible(button);}),"display_loss_restores_source_and_exposes_native_retry");
         SendMessageW(canvas(),WM_COMMAND,gwm::vd::ui::Retry,0);
         require(until([&]{return gwm::vd::InspectOwnedDisplay().active&&observer.query().state==gwm::vd::ipc::State::Ready;}),"native_retry_reinitializes_virtual_display");
-        std::printf("after_retry_original_positions A=%d B=%d C=%d\n",at(first,originalA),at(second,originalB),at(third,originalC));
+        const auto reconnected=observer.query();
+        std::printf("after_retry_original_positions A=%d B=%d C=%d remaining=%u hidden=%u\n",at(first,originalA),at(second,originalB),at(third,originalC),reconnected.remaining,reconnected.hiddenCount);
+        require(at(first,originalA)&&at(second,originalB)&&at(third,originalC)&&reconnected.remaining==0,"reconnection_preserves_restored_window_positions");
         for(int slot=0;slot<3;++slot){const HWND source=slot==0?second:slot==1?first:third;require(until([&]{command(slot,gwm::vd::ui::Hide);const auto reply=observer.query();return hidden(source)&&std::find(reply.hidden,reply.hidden+reply.hiddenCount,uint64_t(uintptr_t(source)))!=reply.hidden+reply.hiddenCount;}),"hide_three_independent_windows");}
         const bool three=until([&]{return observer.query().remaining==3;});
         if(!three){const auto reply=observer.query();std::printf("diagnostic remaining=%u hidden=%u state=%u error=%lu status=%lu\n",reply.remaining,reply.hiddenCount,unsigned(reply.state),reply.error,reply.statusError);for(unsigned i=0;i<reply.hiddenCount;++i)std::printf("hidden[%u]=%llu\n",i,reply.hidden[i]);for(auto source:{first,second,third}){RECT r{};GetWindowRect(source,&r);std::printf("HWND %lu rect=%ld,%ld,%ld,%ld\n",uint32_t(uintptr_t(source)),r.left,r.top,r.right,r.bottom);}}

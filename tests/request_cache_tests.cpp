@@ -24,18 +24,20 @@ ipc::Reply exchange(const std::wstring& pipeName,ipc::Request request){
 ipc::Reply complete(const std::wstring& pipe,ipc::Request request){ipc::Reply reply;require(until([&]{reply=exchange(pipe,request);return reply.error!=ERROR_IO_PENDING;}),"mutation_completes_with_same_request_id");return reply;}
 }
 int wmain(){
-    std::atomic<unsigned> initializations{},detachments{};std::atomic<bool> active{};
+    std::atomic<unsigned> initializations{},detachments{};std::atomic<bool> active{},holdInitialization{};
     HANDLE ready=CreateEventW(nullptr,TRUE,FALSE,nullptr),stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     gwm::vd::BrokerOptions options;options.instanceSuffix=L"request-cache-"+std::to_wstring(GetCurrentProcessId());
     options.readyEvent=ready;options.stopEvent=stop;options.finalReplyGraceMs=500;options.testOperationDelayMs=350;
     options.inspect=[&]{gwm::vd::DisplayResult r;r.installed=true;r.active=active;r.bounds={1920,0,3840,1080};return r;};
-    options.ensure=[&](int,int,const gwm::vd::PhaseCallback&){++initializations;active=true;return options.inspect();};
+    options.ensure=[&](int,int,const gwm::vd::PhaseCallback&){++initializations;while(holdInitialization&&WaitForSingleObject(stop,10)==WAIT_TIMEOUT){}active=true;return options.inspect();};
     options.detach=[&]{++detachments;active=false;return options.inspect();};
     DWORD serverResult{};std::thread server([&]{try{serverResult=gwm::vd::RunRecoveryBroker(options);}catch(...){serverResult=ERROR_UNHANDLED_EXCEPTION;SetEvent(ready);}});
     const auto pipe=gwm::vd::ipc::BrokerPipeName()+L"."+options.instanceSuffix;int result{};
     try{
         require(WaitForSingleObject(ready,4000)==WAIT_OBJECT_0,"isolated_fake_broker_ready");
         ipc::Request registration;registration.operation=ipc::Operation::Register;registration.requestId=1;
+        registration.count=1;registration.windows[0]=UINTPTR_MAX;
+        require(!IsWindow(reinterpret_cast<HWND>(UINTPTR_MAX)),"whitelist_fixture_is_not_a_real_window");
         require(exchange(pipe,registration).error==ERROR_IO_PENDING,"forced_register_returns_pending");
         require(!complete(pipe,registration).error,"register_retry_returns_first_completion");
         ipc::Request initialize;initialize.operation=ipc::Operation::Initialize;initialize.requestId=2;
@@ -46,10 +48,20 @@ int wmain(){
         auto collision=initialize;collision.operation=ipc::Operation::Show;
         require(exchange(pipe,collision).error==ERROR_INVALID_DATA,"request_id_cannot_be_reused_for_different_operation");
         initialize.requestId=3;require(!complete(pipe,initialize).error&&until([&]{return initializations==2;}),"new_request_id_allows_deliberate_reinitialization");
-        ipc::Request release;release.operation=ipc::Operation::Release;release.requestId=4;
+        holdInitialization=true;initialize.requestId=4;
+        require(!complete(pipe,initialize).error&&until([&]{return initializations==3;}),"initializer_remains_in_flight");
+        ipc::Request show;show.operation=ipc::Operation::Show;show.requestId=5;show.window=registration.windows[0];
+        require(complete(pipe,show).error==ERROR_NOT_READY,"show_cannot_clear_a_checkpoint_during_initialization");
+        ipc::Request release;release.operation=ipc::Operation::Release;release.requestId=6;
+        const auto waiting=complete(pipe,release);
+        require(waiting.error==ERROR_BUSY&&waiting.state==ipc::State::Restoring,"release_during_initialization_is_retryable_even_with_zero_records");
+        holdInitialization=false;
+        ipc::Request query;query.operation=ipc::Operation::State;
+        require(until([&]{const auto state=exchange(pipe,query).state;return state==ipc::State::Stopped||state==ipc::State::RestoreFailed;}),"initializer_finishes_before_release_retry");
+        release.requestId=7;
         require(!complete(pipe,release).error,"release_retries_keep_same_identity");
     }catch(const std::exception& error){std::printf("FAIL %s\n",error.what());result=1;}
-    SetEvent(stop);server.join();CloseHandle(ready);CloseHandle(stop);
+    holdInitialization=false;SetEvent(stop);server.join();CloseHandle(ready);CloseHandle(stop);
     if(serverResult||!detachments)result=1;
     // Exact, task-owned test journal only; never traverse or recursively delete.
     DWORD session{};ProcessIdToSessionId(GetCurrentProcessId(),&session);
