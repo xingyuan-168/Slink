@@ -51,6 +51,8 @@ int wmain(int argc, wchar_t** argv) {
         result = gwm::vd::VerifyDriverPackage(argv[2]);
     } else if (argc == 3 && wcscmp(argv[1], L"--install") == 0) {
         result = gwm::vd::InstallOwnedDriver(argv[2], phase);
+    } else if (argc == 3 && wcscmp(argv[1], L"--install-noninteractive") == 0) {
+        result = gwm::vd::InstallOwnedDriver(argv[2], phase, false);
     } else if (argc == 2 && wcscmp(argv[1], L"--detach") == 0) {
         result = gwm::vd::DetachOwnedDisplay();
     } else if ((argc == 2 || argc == 4) && wcscmp(argv[1], L"--extend") == 0) {
@@ -60,7 +62,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         result = gwm::vd::EnsureExtendedDisplay(width, height, phase);
     } else {
-        std::cerr << "driver_probe [--inspect | --verify-package <driver-directory> | --install <driver-directory> | --extend [width height] | --detach]\n"
+        std::cerr << "driver_probe [--inspect | --verify-package <driver-directory> | --install <driver-directory> | --install-noninteractive <driver-directory> | --extend [width height] | --detach]\n"
             "--inspect and --verify-package are read-only. Install requires elevation. Before --detach restore all parked windows.\n";
         return ERROR_INVALID_PARAMETER;
     }
