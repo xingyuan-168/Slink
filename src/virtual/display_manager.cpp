@@ -107,6 +107,20 @@ DisplayResult Failure(DWORD code, const std::wstring& context) {
     result.message = context + L"（" + std::to_wstring(result.code) + L"）：" + ErrorText(result.code);
     return result;
 }
+DisplayResult InstallFailure(DWORD code, const std::wstring& context) {
+    DisplayResult result = Failure(code, context);
+    if (code == ERROR_AUTHENTICODE_TRUST_NOT_ESTABLISHED || code == ERROR_AUTHENTICODE_PUBLISHER_NOT_TRUSTED ||
+        code == ERROR_AUTHENTICODE_DISALLOWED ||
+        code == static_cast<DWORD>(CERT_E_UNTRUSTEDROOT) || code == ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION) {
+        result.message += L"。文件 SHA256/Authenticode 校验通过不代表 Windows 已信任该驱动发布者；"
+            L"驱动安装信任或交互授权尚未满足，静默安装已停止。未导入证书或更改安全策略";
+    }
+    return result;
+}
+struct NonInteractiveSetup {
+    BOOL previous{SetupSetNonInteractiveMode(TRUE)};
+    ~NonInteractiveSetup() { SetupSetNonInteractiveMode(previous); }
+};
 void Report(const PhaseCallback& callback, Phase phase, const wchar_t* text) {
     if (callback) callback(phase, text);
 }
@@ -606,9 +620,12 @@ DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const Pha
     const std::wstring inf = directory + L"\\MttVDD.inf";
     if (inf.size() >= MAX_PATH) return Failure(ERROR_FILENAME_EXCED_RANGE, L"SetupAPI 驱动路径超过长度限制");
     Report(phase, Phase::Installing, L"安装本项目虚拟显示设备");
+    // A background helper must fail explicitly when Windows requires publisher
+    // confirmation, instead of blocking on an invisible Windows Security UI.
+    NonInteractiveSetup nonInteractive;
     wchar_t publishedInf[MAX_PATH]{};
     if (!SetupCopyOEMInfW(inf.c_str(), directory.c_str(), SPOST_PATH, 0, publishedInf, MAX_PATH, nullptr, nullptr))
-        return Failure(GetLastError(), L"Windows 拒绝将原始驱动加入驱动存储");
+        return InstallFailure(GetLastError(), L"Windows 拒绝将原始驱动加入驱动存储");
 
     DeviceSet set(SetupDiCreateDeviceInfoList(&kDisplayClass, nullptr));
     if (set.value == INVALID_HANDLE_VALUE) return Failure(GetLastError(), L"创建显示设备信息集失败");
@@ -642,7 +659,7 @@ DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const Pha
     const BOOL installed = DiInstallDevice(nullptr, set.value, &info, &driver, 0, &needReboot);
     const DWORD installError = GetLastError();
     SetupDiDestroyDriverInfoList(set.value, &info, SPDIT_COMPATDRIVER);
-    if (!installed) return Failure(installError, L"Windows 拒绝安装虚拟显示驱动");
+    if (!installed) return InstallFailure(installError, L"Windows 拒绝安装虚拟显示驱动");
     bool reboot = needReboot != FALSE;
     if (!reboot) {
         const DWORD startError = StartDevice(set.value, info, reboot);
