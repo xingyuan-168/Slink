@@ -113,12 +113,13 @@ DisplayResult InstallFailure(DWORD code, const std::wstring& context) {
         code == ERROR_AUTHENTICODE_DISALLOWED ||
         code == static_cast<DWORD>(CERT_E_UNTRUSTEDROOT) || code == ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION) {
         result.message += L"。文件 SHA256/Authenticode 校验通过不代表 Windows 已信任该驱动发布者；"
-            L"驱动安装信任或交互授权尚未满足，静默安装已停止。未导入证书或更改安全策略";
+            L"驱动安装信任或交互授权尚未满足，安装已停止。未导入证书或更改安全策略";
     }
     return result;
 }
 struct NonInteractiveSetup {
-    BOOL previous{SetupSetNonInteractiveMode(TRUE)};
+    BOOL previous{};
+    explicit NonInteractiveSetup(bool allowSystemPrompt) : previous(SetupSetNonInteractiveMode(!allowSystemPrompt)) {}
     ~NonInteractiveSetup() { SetupSetNonInteractiveMode(previous); }
 };
 void Report(const PhaseCallback& callback, Phase phase, const wchar_t* text) {
@@ -584,7 +585,7 @@ DisplayResult VerifyDriverPackage(const std::wstring& packageDirectory) {
     return result;
 }
 
-DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const PhaseCallback& phase) {
+DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const PhaseCallback& phase, bool allowSystemPrompt) {
     SYSTEM_INFO system{};
     GetNativeSystemInfo(&system);
     if (sizeof(void*) != 8 || system.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_AMD64)
@@ -600,7 +601,8 @@ DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const Pha
     std::wstring instance; bool marked{};
     std::vector<Device> devices;
     if (const DWORD error = CheckOwnership(instance, marked, devices)) return Failure(error, L"驱动所有权检查失败，未修改现有设备");
-    if (!devices.empty()) {
+    const bool createdNewDevice = devices.empty();
+    if (!createdNewDevice) {
         DisplayResult current = InspectImpl();
         if (current) return current;
     }
@@ -620,9 +622,10 @@ DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const Pha
     const std::wstring inf = directory + L"\\MttVDD.inf";
     if (inf.size() >= MAX_PATH) return Failure(ERROR_FILENAME_EXCED_RANGE, L"SetupAPI 驱动路径超过长度限制");
     Report(phase, Phase::Installing, L"安装本项目虚拟显示设备");
-    // A background helper must fail explicitly when Windows requires publisher
-    // confirmation, instead of blocking on an invisible Windows Security UI.
-    NonInteractiveSetup nonInteractive;
+    // First-use publisher consent belongs to Windows, never to a certificate
+    // import workaround. A diagnostic caller may instead require an immediate
+    // non-interactive trust failure; always restore the process setting.
+    NonInteractiveSetup nonInteractive(allowSystemPrompt);
     wchar_t publishedInf[MAX_PATH]{};
     if (!SetupCopyOEMInfW(inf.c_str(), directory.c_str(), SPOST_PATH, 0, publishedInf, MAX_PATH, nullptr, nullptr))
         return InstallFailure(GetLastError(), L"Windows 拒绝将原始驱动加入驱动存储");
@@ -682,6 +685,14 @@ DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory, const Pha
         if (result || result.rebootRequired || (result.code != ERROR_NOT_READY && result.code != ERROR_NOT_FOUND)) break;
         if (GetTickCount64() >= deadline) break;
         Sleep(200);
+    }
+    if (result && createdNewDevice && result.active) {
+        // Windows can initially clone a newly arrived IDD onto the primary
+        // source. No session can park here yet: this call still owns the global
+        // configuration mutex, and there was no previous owned devnode. Remove
+        // only this new path before the caller explicitly requests extension.
+        result = DetachOwnedDisplay();
+        if (!result) result.message = L"新设备已安装，但撤销 Windows 默认显示路径失败：" + result.message;
     }
     return result;
 }

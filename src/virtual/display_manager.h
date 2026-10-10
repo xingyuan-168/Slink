@@ -36,8 +36,10 @@ DisplayResult VerifyDriverPackage(const std::wstring& packageDirectory);
 // 25.7.23 release's MttVDD.inf, MttVDD.dll and mttvdd.cat. Their pinned SHA256 and
 // Authenticode trust are checked before Windows is allowed to install anything.
 // Never edits these files; driver configuration is generated separately.
+// System publisher confirmation is allowed on the first installation. Set
+// allowSystemPrompt=false only for a diagnostic that must fail without any UI.
 DisplayResult InstallOwnedDriver(const std::wstring& packageDirectory,
-                                 const PhaseCallback& phase = {});
+                                 const PhaseCallback& phase = {}, bool allowSystemPrompt = true);
 
 // Current console session only. Keeps every other path's geometry/mode and does
 // not select a new primary display. It never shrinks an already active screen.
