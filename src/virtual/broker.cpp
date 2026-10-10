@@ -1,6 +1,7 @@
 #include "broker.h"
 #include "protocol.h"
 #include "window_parking.h"
+#include "recovery_prompt.h"
 
 #include <aclapi.h>
 #include <sddl.h>
@@ -379,7 +380,8 @@ public:
             try {
                 if (!GetNamedPipeClientProcessId(pipe.get(), &clientPid) || !transfer(pipe.get(), request, false)) fail(ERROR_INVALID_DATA);
                 if (request.magic != ipc::Magic || request.version != ipc::Version || request.processId != clientPid ||
-                    request.count > ipc::MaxWindows || uint32_t(request.operation) > uint32_t(ipc::Operation::Release)) fail(ERROR_INVALID_DATA);
+                    request.count > ipc::MaxWindows || uint32_t(request.operation) > uint32_t(ipc::Operation::Release) ||
+                    (request.operation!=ipc::Operation::Ping&&request.operation!=ipc::Operation::State&&!request.requestId)) fail(ERROR_INVALID_DATA);
                 peer = security_.peer(clientPid);
                 if (request.operation == ipc::Operation::Ping || request.operation == ipc::Operation::State) reply = state(peer->identity, request.operation == ipc::Operation::State);
                 else reply = submit(*peer, request);
@@ -423,8 +425,11 @@ private:
     std::vector<SessionIdentity> completed_;
     std::deque<std::shared_ptr<Job>> queue_;
     std::vector<std::shared_ptr<Job>> outstanding_;
+    std::deque<std::shared_ptr<Job>> completedJobs_;
     std::thread worker_, initializer_;
     std::atomic<bool> initRunning_{}, quitWorker_{}, exitReady_{}, stopRequested_{};
+    std::atomic<bool> retryRequested_{};
+    RecoveryPrompt recoveryPrompt_{[this]{retryRequested_=true;queueChanged_.notify_one();}};
     ipc::State globalState_{ipc::State::Checking};
     DisplayResult display_{};
     DWORD startupError_{};
@@ -514,6 +519,13 @@ private:
         std::shared_ptr<Job> job;
         {
             std::scoped_lock lock(queueMutex_);
+            const auto completed=std::find_if(completedJobs_.begin(),completedJobs_.end(),[&](const auto& entry){
+                return entry->peer.identity==peer.identity&&entry->request.requestId==request.requestId;
+            });
+            if(completed!=completedJobs_.end()){
+                if(std::memcmp(&(*completed)->request,&request,sizeof(request))!=0)fail(ERROR_INVALID_DATA);
+                return (*completed)->completion.get();
+            }
             auto existing = std::find_if(outstanding_.begin(), outstanding_.end(), [&](const auto& entry) {
                 return entry->peer.identity == peer.identity && std::memcmp(&entry->request, &request, sizeof(request)) == 0;
             });
@@ -546,7 +558,7 @@ private:
             }
         }
         if (request.operation == ipc::Operation::Release) release(peer.identity);
-        else if (request.operation == ipc::Operation::Initialize) initialize();
+        else if (request.operation == ipc::Operation::Initialize) { leaseResult(peer.identity, 0, L""); initialize(); }
         else if (request.operation == ipc::Operation::Hide || request.operation == ipc::Operation::Show) windowOperation(peer.identity, request);
         return state(peer.identity);
     }
@@ -680,7 +692,7 @@ private:
             std::scoped_lock lock(stateMutex_);
             if (now - initStarted_ >= kInstallerDeadlineMs) { globalState_ = ipc::State::Unavailable; display_.code = ERROR_TIMEOUT; display_.message = L"初始化等待超过 120 秒；可关闭画布，后台仍会观察安装结束并安全收尾"; }
         }
-        if (now - lastRecovery_ >= 2000 || stopRequested_) {
+        if (retryRequested_.exchange(false) || now - lastRecovery_ >= 2000 || stopRequested_) {
             lastRecovery_ = now; std::vector<SessionIdentity> restore;
             { std::scoped_lock lock(stateMutex_); for (const auto& lease : leases_) if (stopRequested_ || lease.closing || !lease.process || WaitForSingleObject(lease.process->get(), 0) != WAIT_TIMEOUT) restore.push_back(lease.data.identity); }
             for (const auto& identity : restore) release(identity);
@@ -700,6 +712,15 @@ private:
         bool retryLost{};
         { std::scoped_lock lock(stateMutex_); retryLost = !initRunning_ && globalState_ == ipc::State::RestoreFailed && !cachedRecords_.empty() && now - lastInspection_ >= 2000; }
         if (retryLost) { lastInspection_ = now; const auto report = parking_.restoreAll(); refreshRecords(); if (report.complete()) { std::scoped_lock lock(stateMutex_); globalState_ = ipc::State::Unavailable; display_.message = L"窗口已恢复，请重试初始化"; } }
+        unsigned orphaned{};DWORD recoveryError{};std::wstring recoveryMessage;
+        {
+            std::scoped_lock lock(stateMutex_);
+            for(const auto& lease:leases_)if(lease.error&&(!lease.process||WaitForSingleObject(lease.process->get(),0)!=WAIT_TIMEOUT)){
+                for(const auto& record:cachedRecords_)if(record.session==lease.data.identity)++orphaned;
+                recoveryError=lease.error;recoveryMessage=lease.message;
+            }
+        }
+        recoveryPrompt_.update(orphaned,recoveryError,recoveryMessage);
         bool empty{}, touched{}, expired{};
         {
             std::scoped_lock lock(stateMutex_); empty = leases_.empty() && cachedRecords_.empty(); touched = displayTouched_;
@@ -721,11 +742,12 @@ private:
             { std::unique_lock lock(queueMutex_); queueChanged_.wait_for(lock, std::chrono::milliseconds(100), [&] { return quitWorker_ || !queue_.empty(); }); if (!queue_.empty()) { job = queue_.front(); queue_.pop_front(); } }
             if (job) {
                 ipc::Reply reply;
+                if(options_.testOperationDelayMs)Sleep(options_.testOperationDelayMs);
                 try { reply = execute(job->peer, job->request); }
                 catch (const std::system_error& error) { leaseResult(job->peer.identity, DWORD(error.code().value()), L"恢复操作未完成，原记录保持可重试"); reply = state(job->peer.identity); reply.error = DWORD(error.code().value()); journal_.log(L"operation failed", reply.error); }
                 catch (...) { reply = state(job->peer.identity); reply.error = ERROR_UNHANDLED_EXCEPTION; }
                 job->promise.set_value(reply);
-                { std::scoped_lock lock(queueMutex_); outstanding_.erase(std::remove(outstanding_.begin(), outstanding_.end(), job), outstanding_.end()); }
+                { std::scoped_lock lock(queueMutex_); completedJobs_.push_back(job);if(completedJobs_.size()>256)completedJobs_.pop_front();outstanding_.erase(std::remove(outstanding_.begin(), outstanding_.end(), job), outstanding_.end()); }
             }
             try { maintain(); } catch (const std::system_error& error) { journal_.log(L"recovery maintenance failed", DWORD(error.code().value())); }
             catch (...) { journal_.log(L"recovery maintenance failed", ERROR_UNHANDLED_EXCEPTION); }

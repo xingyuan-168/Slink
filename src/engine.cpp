@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "capture.h"
+#include "virtual/ui_ids.h"
 #include <windowsx.h>
 #include <dwmapi.h>
 #include <map>
@@ -9,6 +10,46 @@ namespace gwm {
 HINSTANCE module=nullptr;
 static constexpr wchar_t ClassName[]=L"GameWindowMapper.Canvas.v1";
 static constexpr UINT FinishClose=WM_APP+71;
+static constexpr UINT StatusChanged=WM_APP+72;
+static constexpr UINT ActivateSource=WM_APP+73;
+namespace {
+struct StatusCard {
+    std::wstring title,message;
+    bool visible{},progress{},retry{},closing{};
+};
+StatusCard statusCard(const vd::CanvasStatus& status) {
+    using vd::ipc::State;
+    StatusCard card;
+    if(status.finished)return card;
+    card.visible=true;card.message=status.reply.message;card.closing=status.closing;
+    if(status.closing){
+        card.title=status.reply.state==State::RestoreFailed?L"源窗口恢复尚未完成":L"正在恢复源窗口";
+        card.message=L"剩余 "+std::to_wstring(status.reply.remaining)+L" 个窗口。"+card.message;
+        card.retry=status.reply.state==State::RestoreFailed;card.progress=!card.retry;return card;
+    }
+    switch(status.reply.state){
+    case State::Checking:card.title=L"正在检查虚拟显示器";card.progress=true;break;
+    case State::Installing:card.title=L"正在安装虚拟显示驱动";card.progress=true;break;
+    case State::Initializing:card.title=L"正在初始化扩展屏";card.progress=true;break;
+    case State::Restoring:card.title=L"正在恢复源窗口";card.progress=true;break;
+    case State::RestoreFailed:card.title=L"源窗口恢复尚未完成";card.retry=true;break;
+    case State::RestartRequired:card.title=L"驱动需要重启 Windows";card.retry=true;break;
+    case State::Conflict:card.title=L"虚拟显示驱动被其他软件占用";card.retry=true;break;
+    case State::Unavailable:card.title=L"隐藏功能暂不可用";card.retry=true;break;
+    default:
+        if(!status.transient.empty()&&nowMs()<status.transientUntil){card.title=L"窗口操作未完成";card.message=status.transient;}
+        else card.visible=false;
+    }
+    if(card.message.empty())card.message=card.progress?L"普通窗口映射继续可用，请稍候。":L"普通窗口映射继续可用；可重新检查。";
+    return card;
+}
+RECT cardRect(int w,int h,float dpi) {
+    const int margin=std::min(int(16*dpi),std::max(0,w/8));
+    const int width=std::max(1,std::min(w-2*margin,int(520*dpi)));
+    const int top=std::min(int(12*dpi),std::max(0,h/8));
+    return {(w-width)/2,top,(w+width)/2,std::min(h,top+int(172*dpi))};
+}
+}
 Engine::Engine(Config c,int px,int py,int w,int h):config(std::move(c)),x(px),y(py),initialWidth(w),initialHeight(h) {
     for(auto& s:config.slots){s.generation=nextGeneration();s.state=s.hwnd?GWM_WAITING:GWM_EMPTY;}
 }
@@ -22,7 +63,7 @@ void Engine::requestStop() noexcept {stopRequested=true;state=GWM_CANVAS_STOPPIN
 void Engine::wait() {if(uiThread.joinable())uiThread.join();}
 void Engine::stop() {requestStop();wait();state=GWM_STOPPED;}
 Config Engine::snapshot(){std::lock_guard lock(configMutex);return config;}
-void Engine::activate(int px,int py) {
+Hit Engine::targetAt(int px,int py) {
     Hit target{};bool found=false;
     {
         std::lock_guard lock(configMutex);
@@ -31,14 +72,73 @@ void Engine::activate(int px,int py) {
             break;
         }
     }
-    if(!found||!target.hwnd)return;
-    HWND h=toWindow(target.hwnd);if(!IsWindow(h))return;
+    return found?target:Hit{};
+}
+void Engine::activate(int px,int py) {
+    const auto target=targetAt(px,py);
+    if(!target.hwnd||controller.snapshot().closing)return;
+    if(controllerStarted)controller.show(target.hwnd,true);
+    else activateWindow(target.hwnd);
+}
+void Engine::activateWindow(uint64_t raw) {
+    if(controller.snapshot().closing)return;
+    {std::lock_guard lock(configMutex);if(std::none_of(config.slots.begin(),config.slots.end(),[&](const Slot& s){return s.hwnd==raw&&s.state!=GWM_INVALID;}))return;}
+    HWND h=toWindow(static_cast<uint32_t>(raw));if(!IsWindow(h))return;
     if(IsIconic(h))ShowWindowAsync(h,SW_RESTORE);
     bool activated=SetForegroundWindow(h)!=FALSE;
     if(!activated){FLASHWINFO info{sizeof(info),h,FLASHW_TRAY,2,0};FlashWindowEx(&info);}
     std::lock_guard lock(configMutex);
-    if(target.slot<config.slots.size()&&config.slots[target.slot].generation==target.generation)
-        config.slots[target.slot].error=activated?GWM_OK:GWM_ACTIVATION_DENIED;
+    for(auto& slot:config.slots)if(slot.hwnd==raw&&slot.state!=GWM_INVALID)
+        slot.error=activated?GWM_OK:GWM_ACTIVATION_DENIED;
+}
+void Engine::closeCanvas() {
+    if(controllerStarted)controller.close();else requestStop();
+}
+void Engine::command(UINT id) {
+    const auto status=controller.snapshot();
+    if(id==vd::ui::Retry||id==vd::ui::RetryRestore){controller.retry();return;}
+    if(status.closing||status.busy||!contextTarget.hwnd)return;
+    bool valid=false;
+    {std::lock_guard lock(configMutex);valid=contextTarget.slot<config.slots.size()&&
+        config.slots[contextTarget.slot].generation==contextTarget.generation&&config.slots[contextTarget.slot].state!=GWM_INVALID;}
+    if(!valid||!IsWindow(toWindow(contextTarget.hwnd)))return;
+    if(id==vd::ui::Hide&&status.connected&&status.reply.state==vd::ipc::State::Ready&&status.reply.active&&!status.reply.statusError&&!status.hidden(contextTarget.hwnd))controller.hide(contextTarget.hwnd);
+    if(id==vd::ui::Show&&status.hidden(contextTarget.hwnd))controller.show(contextTarget.hwnd);
+}
+void Engine::contextMenu(int sx,int sy) {
+    HWND h=hwnd.load();POINT point{sx,sy};
+    if(sx==-1&&sy==-1){
+        RECT client{};GetClientRect(h,&client);point={client.right/2,client.bottom/2};
+        if(!contextTarget.hwnd){std::lock_guard lock(configMutex);for(const auto& hit:hits)if(hit.hwnd){contextTarget=hit;break;}}
+        ClientToScreen(h,&point);
+    }else{POINT local=point;ScreenToClient(h,&local);contextTarget=targetAt(local.x,local.y);}
+    const auto status=controller.snapshot();
+    HMENU menu=CreatePopupMenu();if(!menu)return;
+    const bool valid=contextTarget.hwnd&&IsWindow(toWindow(contextTarget.hwnd));
+    if(valid){
+        std::wstring label=L"槽位 "+std::to_wstring(contextTarget.slot+1)+L" · HWND "+std::to_wstring(contextTarget.hwnd);
+        AppendMenuW(menu,MF_STRING|MF_GRAYED,0,label.c_str());AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+        const bool hidden=status.hidden(contextTarget.hwnd),free=!status.closing&&!status.busy;
+        const bool ready=status.connected&&status.reply.state==vd::ipc::State::Ready&&status.reply.active&&!status.reply.statusError;
+        AppendMenuW(menu,MF_STRING|(free&&ready&&!hidden?MF_ENABLED:MF_GRAYED),vd::ui::Hide,L"隐藏窗口");
+        AppendMenuW(menu,MF_STRING|(free&&hidden?MF_ENABLED:MF_GRAYED),vd::ui::Show,L"显示窗口");
+    }
+    if(status.closing)AppendMenuW(menu,MF_STRING,vd::ui::RetryRestore,L"重试恢复");
+    else if(statusCard(status).retry)AppendMenuW(menu,MF_STRING,vd::ui::Retry,L"重新检查");
+    if(!GetMenuItemCount(menu)){DestroyMenu(menu);return;}
+    const UINT selected=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,0,h,nullptr);
+    DestroyMenu(menu);if(selected)command(selected);
+}
+void Engine::updateStatusControls() {
+    if(!retryButton)return;
+    BOOL animations=TRUE;SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&animations,0);animateProgress=animations!=FALSE;
+    RECT bounds{};GetClientRect(hwnd.load(),&bounds);const float dpi=GetDpiForWindow(hwnd.load())/96.0f;
+    const auto card=statusCard(controller.snapshot());const auto r=cardRect(bounds.right,bounds.bottom,dpi);
+    if(card.visible&&card.retry&&r.bottom-r.top>60*dpi){
+        SetWindowTextW(retryButton,card.closing?L"重试恢复":L"重新检查");
+        const int height=std::min(int(30*dpi),int(r.bottom-r.top)),width=std::min(int(120*dpi),int(r.right-r.left));
+        SetWindowPos(retryButton,HWND_TOP,r.right-width-int(16*dpi),r.bottom-height-int(12*dpi),width,height,SWP_NOACTIVATE|SWP_SHOWWINDOW);
+    }else ShowWindow(retryButton,SW_HIDE);
 }
 LRESULT CALLBACK Engine::wndProc(HWND window,UINT message,WPARAM wp,LPARAM lp) noexcept {
     auto self=reinterpret_cast<Engine*>(GetWindowLongPtrW(window,GWLP_USERDATA));
@@ -46,17 +146,24 @@ LRESULT CALLBACK Engine::wndProc(HWND window,UINT message,WPARAM wp,LPARAM lp) n
     if(!self)return DefWindowProcW(window,message,wp,lp);
     try{
         switch(message){
-        case WM_CLOSE:self->requestStop();return 0;
+        case WM_CLOSE:self->closeCanvas();return 0;
         case FinishClose:DestroyWindow(window);return 0;
         case WM_DESTROY:self->requestStop();PostQuitMessage(0);return 0;
+        case StatusChanged:self->updateStatusControls();self->wake.notify_all();return 0;
+        case ActivateSource:self->activateWindow(static_cast<uint64_t>(wp));return 0;
+        case WM_RBUTTONDOWN:self->contextTarget=self->targetAt(GET_X_LPARAM(lp),GET_Y_LPARAM(lp));return 0;
+        case WM_CONTEXTMENU:self->contextMenu(GET_X_LPARAM(lp),GET_Y_LPARAM(lp));return 0;
+        case WM_COMMAND:self->command(LOWORD(wp));return 0;
+        case WM_KEYDOWN:if(wp==VK_F10&&(GetKeyState(VK_SHIFT)&0x8000)){self->contextMenu(-1,-1);return 0;}break;
         case WM_LBUTTONDBLCLK:self->activate(GET_X_LPARAM(lp),GET_Y_LPARAM(lp));return 0;
-        case WM_SIZE:self->wake.notify_all();return 0;
+        case WM_SIZE:self->updateStatusControls();self->wake.notify_all();return 0;
+        case WM_SETTINGCHANGE:self->updateStatusControls();return 0;
         case WM_ERASEBKGND:return 1;
         case WM_PAINT:{PAINTSTRUCT p{};BeginPaint(window,&p);EndPaint(window,&p);return 0;}
         case WM_DPICHANGED:{const auto r=reinterpret_cast<RECT*>(lp);SetWindowPos(window,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
         case WM_GETMINMAXINFO:{auto p=reinterpret_cast<MINMAXINFO*>(lp);p->ptMinTrackSize={160,120};return 0;}
         }
-    }catch(...){self->requestStop();}
+    }catch(...){self->closeCanvas();}
     return DefWindowProcW(window,message,wp,lp);
 }
 void Engine::uiMain() noexcept {
@@ -82,13 +189,21 @@ void Engine::uiMain() noexcept {
         BOOL dark=TRUE;DwmSetWindowAttribute(h,20,&dark,sizeof(dark));
         // Do not inherit STARTUPINFO.wShowWindow from a hidden/tray host.
         SetWindowPos(h,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW);UpdateWindow(h);
+        retryButton=CreateWindowExW(0,L"BUTTON",L"重新检查",WS_CHILD|WS_TABSTOP|BS_PUSHBUTTON,
+            0,0,120,30,h,reinterpret_cast<HMENU>(vd::ui::Retry),module,nullptr);
+        SendMessageW(retryButton,WM_SETFONT,reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),TRUE);
+        std::vector<uint64_t> windows;for(const auto& slot:config.slots)if(slot.hwnd)windows.push_back(slot.hwnd);
+        controller.start(module,std::move(windows),[this]{PostMessageW(hwnd.load(),StatusChanged,0,0);},
+            [this]{requestStop();},[this](uint64_t source){PostMessageW(hwnd.load(),ActivateSource,static_cast<WPARAM>(source),0);});
+        controllerStarted=true;
         renderThread=std::thread([this]{renderMain();});
         {std::lock_guard lock(wakeMutex);uiReady=true;}wake.notify_all();
-        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}
+        MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0)if(!IsDialogMessageW(h,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}
     }catch(...){
         requestStop();{std::lock_guard lock(wakeMutex);startupError=GWM_INTERNAL_ERROR;uiReady=true;if(!renderThread.joinable())renderReady=true;}wake.notify_all();
     }
     stopRequested=true;wake.notify_all();
+    controller.shutdown();
     if(renderThread.joinable())renderThread.join();
     if(auto h=hwnd.exchange(nullptr);h&&IsWindow(h))DestroyWindow(h);
     if(registered)UnregisterClassW(ClassName,module);
@@ -159,6 +274,7 @@ void Engine::renderMain() noexcept {
                 if(bounds.right!=graphics->width||bounds.bottom!=graphics->height)graphics->resize(bounds.right,bounds.bottom);
                 graphics->setTextDpi(GetDpiForWindow(canvas));
                 graphics->begin();float dpiScale=float(GetDpiForWindow(canvas))/96.0f;
+                const auto virtualStatus=controller.snapshot();
                 for(int i=0;i<view.rows*view.cols;++i){
                     RECT r=tileRect(bounds.right,bounds.bottom,view.rows,view.cols,i);
                     float header=std::min(float(r.bottom-r.top),30*dpiScale);
@@ -173,6 +289,11 @@ void Engine::renderMain() noexcept {
                         title+=buffer[0]?std::wstring(buffer):L"HWND "+std::to_wstring(s->hwnd);
                     }else title+=L"空槽位";
                     auto textBox=titleBox;textBox.left+=8; textBox.right-=6;
+                    if(s&&virtualStatus.hidden(s->hwnd)){
+                        const float badgeWidth=std::min(68*dpiScale,(titleBox.right-titleBox.left)*.5f);
+                        auto badge=titleBox;badge.left=badge.right-badgeWidth;
+                        graphics->text(L"虚拟屏",badge,0x85c6ff,true);textBox.right=badge.left-4*dpiScale;
+                    }
                     graphics->text(title,textBox,0xe6eaf0);
                     graphics->dc->PushAxisAlignedClip(content,D2D1_ANTIALIAS_MODE_ALIASED);
                     if(s&&s->hwnd&&s->state==GWM_LIVE){
@@ -188,6 +309,22 @@ void Engine::renderMain() noexcept {
                     graphics->fill(D2D1::RectF(float(r.right-1),float(r.top),float(r.right),float(r.bottom)),0x353b46);
                     graphics->fill(D2D1::RectF(float(r.left),float(r.bottom-1),float(r.right),float(r.bottom)),0x353b46);
                     if(s)newHits.push_back({r,size_t(i),s->generation,s->hwnd});
+                }
+                const auto card=statusCard(virtualStatus);
+                if(card.visible){
+                    const auto r=cardRect(bounds.right,bounds.bottom,dpiScale);
+                    auto box=D2D1::RectF(float(r.left),float(r.top),float(r.right),float(r.bottom));
+                    graphics->fill(box,0x353b46);box.left+=1;box.top+=1;box.right-=1;box.bottom-=1;graphics->fill(box,0x20252d);
+                    auto text=box;text.left+=16*dpiScale;text.right-=16*dpiScale;text.top+=8*dpiScale;text.bottom=std::min(box.bottom,text.top+30*dpiScale);
+                    graphics->text(card.title,text,0xe6eaf0);
+                    text.top=text.bottom+4*dpiScale;text.bottom=std::min(box.bottom-48*dpiScale,text.top+72*dpiScale);
+                    if(text.bottom>text.top)graphics->text(card.message,text,0xadb5c3,true);
+                    if(card.progress&&box.bottom-box.top>80*dpiScale){
+                        auto bar=D2D1::RectF(box.left+16*dpiScale,box.bottom-24*dpiScale,box.right-16*dpiScale,box.bottom-20*dpiScale);
+                        graphics->fill(bar,0x353b46);const float width=bar.right-bar.left;
+                        const float phase=animateProgress?float(nowMs()%1600)/1600.0f:.5f;
+                        const float length=width*.24f;bar.left+=(width-length)*phase;bar.right=bar.left+length;graphics->fill(bar,0x85c6ff);
+                    }
                 }
                 if(graphics->end())++presentedFrames;
             }

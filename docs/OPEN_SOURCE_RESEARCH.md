@@ -77,6 +77,7 @@ reason: 复用 VirtualDrivers 25.7.23 原始签名驱动，构建轻量安装、
 - https://learn.microsoft.com/en-us/windows-hardware/drivers/install/troubleshooting-driver-signing-installation — 目录 Authenticode 验证与实际设备安装策略需分别判断；保留系统发布者确认。
 - https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes — 打包桌面应用的 AppData 文件路径可能重定向；本机已观察到逻辑/物理映像路径不同。
 - https://learn.microsoft.com/en-us/windows/desktop/api/winbase/ns-winbase-file_id_info — 打开的文件 ID 和卷编号用于判断两个句柄是否指向同一文件；用于恢复服务身份核验。
+- https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setdisplayconfig — ERROR_ACCESS_DENIED 可能来自无当前控制台／输入桌面权限或远程会话；本轮 InputDesktop 读取也返回5时暂停真实窗口验收，不改驱动签名或系统策略。
 
 本次已阅读项目说明、许可证、接口文档以及 Win32CaptureSample 的 SimpleCapture.cpp/.h 和 CropAndLock 的 ThumbnailCropAndLockWindow.cpp。2026-09-11 核验 HEAD：Win32CaptureSample `49fefe79fd9b11025f0b5eb91783a98888516070`；PowerToys `bb656da414e09808f6d25c98dca4313e7e37f828`。仅参考 API 与生命周期设计，未复制项目代码、未引入这些项目的二进制或源代码依赖。
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "protocol.h"
 #include <span>
+#include <optional>
 
 namespace gwm::vd {
 // Use on one DLL-owned worker thread. No graphics or host/UI pointer crosses IPC.
@@ -22,5 +23,6 @@ private:
     std::wstring helper_;
     bool registered_{};
     ipc::Reply lastReply_{};
+    std::optional<ipc::Request> pending_;
 };
 }

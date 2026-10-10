@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <system_error>
+#include <bcrypt.h>
 
 namespace gwm::vd {
 namespace {
@@ -148,8 +149,13 @@ DWORD RecoveryClient::connect(HINSTANCE module, std::span<const uint64_t> window
         if (ping.error) return ping.error;
         ipc::Request request;
         request.operation = ipc::Operation::Register;
+        if(BCryptGenRandom(nullptr,reinterpret_cast<PUCHAR>(&request.requestId),sizeof(request.requestId),BCRYPT_USE_SYSTEM_PREFERRED_RNG)<0||!request.requestId)return ERROR_GEN_FAILURE;
         request.count = static_cast<uint32_t>(windows.size());
         std::copy(windows.begin(), windows.end(), request.windows);
+        // The server may durably register before the reply is lost. Keep a
+        // possible lease until Release confirms completion, including close
+        // during registration or a transport timeout.
+        registered_ = true;
         auto reply = call(request);
         const ULONGLONG deadline = GetTickCount64() + 10000;
         // A durable journal write can outlive the broker's short reply budget.
@@ -174,7 +180,14 @@ ipc::Reply RecoveryClient::operation(ipc::Operation action, uint64_t window, DWO
     ipc::Request request;
     request.operation = action;
     request.window = window;
-    return call(request, timeoutMs);
+    const bool mutation=action!=ipc::Operation::Ping&&action!=ipc::Operation::State;
+    if(mutation){
+        if(pending_&&pending_->operation==action&&pending_->window==window)request=*pending_;
+        else if(BCryptGenRandom(nullptr,reinterpret_cast<PUCHAR>(&request.requestId),sizeof(request.requestId),BCRYPT_USE_SYSTEM_PREFERRED_RNG)<0||!request.requestId)return failure(ERROR_GEN_FAILURE);
+    }
+    auto reply=call(request,timeoutMs);
+    if(mutation){if(reply.error==ERROR_IO_PENDING)pending_=request;else pending_.reset();}
+    return reply;
 }
 ipc::Reply RecoveryClient::initialize() { return operation(ipc::Operation::Initialize); }
 ipc::Reply RecoveryClient::query() { return operation(ipc::Operation::State); }

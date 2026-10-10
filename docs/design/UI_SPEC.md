@@ -2,11 +2,11 @@
 
 requirement_id: REQ-GWM-002
 frontend_scope: gwm-virtual-display-v1
-approval_status: pending
+approval_status: approved
 
 ## 审批范围
 
-2026-10-09 新增交互待审批：初始化进度/失败重试、右键隐藏/显示、虚拟屏标记、关闭恢复与失败重试。原型不会安装驱动或操作实际窗口。既有 gwm-wall-v1 外观审批保留为历史，不覆盖本次修改。
+2026-10-10 用户明确批准本次新增交互：初始化进度/失败重试、右键隐藏/显示、虚拟屏标记、关闭恢复与失败重试；并选择先接入正式 DLL，再由用户统一验收大漠。原型不会安装驱动或操作实际窗口。既有 gwm-wall-v1 外观审批保留为历史。
 
 ### 虚拟显示器交互
 
@@ -59,5 +59,9 @@ approval_status: pending
 
 approval:
   type: frontend
-  scope: gwm-virtual-display-v1
-  status: pending
+  scope: "gwm-virtual-display-v1"
+  status: approved
+  approved_by: "user"
+  approved_at: 2026-10-10
+  spec_sha256: e0ef7b8b5ac1fc795fced37d62bf811812b37f8259d80f60a0c60c6c0ddb5ec0
+  prototype_sha256: 91b03a08e1e813a6ea2ca5525d3f81638a1e2c2e782873b0b2a974b626f79504

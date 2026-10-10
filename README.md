@@ -2,11 +2,11 @@
 
 供 32 位易语言调用的 Windows 原生窗口墙 DLL。按传入 HWND 数组的原始顺序，裁剪客户区并显示到可缩放网格。
 
-REQ-GWM-002 正在接续实施：GPU 拉伸铺满及虚拟显示/独立恢复后端已短测通过，新增画布交互待本次原型审批、大漠兼容待用户验收。当前 output 仍为原交付；不能将开发 DLL 的内嵌负载视为正式隐藏菜单已可用。当前状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。
+REQ-GWM-002 已接入正式原生画布：GPU 拉伸铺满、右键隐藏／显示、异步驱动初始化和关闭前恢复。2026-10-10 新版原型已获用户批准；大漠和易语言按用户选择在正式 DLL 上验收。最新验证状态与未测项见 [测试报告](docs/TEST_REPORT.md)。
 
 ## 使用与交付
 
-正式交付只有 `output/GameWindowMapper.dll` 和 `output/使用说明.md`。唯一命令是 `WM_StartMapping`（易语言命名“开始映射”），包含全部启动配置；运行期间不更新。关闭画布自动释放映射资源，无需停止命令；改变参数时关闭后重新启动。
+正式交付只有 `output/GameWindowMapper.dll` 和 `output/使用说明.md`。唯一命令是 `WM_StartMapping`（易语言命名“开始映射”），保留原 14 参数与全部启动配置；运行期间不更新。右键格子隐藏／显示源窗口，关闭画布先恢复隐藏窗口再释放；恢复失败保留画布重试，无需停止命令。改变参数时关闭后重新启动。
 
 新版采用 14 参数声明，不能沿用旧版 12 参数声明。[使用说明](docs/E_LANGUAGE.md) 包含完整声明、默认参数、易语言示例、直接传PNG/BMP/JPEG底图、可选配置字节集格式及返回码。LOGO 内嵌于 DLL。开发源码、测试 EXE、ICO、头文件和测试报告留在仓库，不复制到交付目录。
 
@@ -19,7 +19,7 @@ C++20 / MSVC / CMake / x86 / 静态 CRT；WGC + D3D11、D2D/DirectWrite、WIC。
 ./scripts/package.ps1 -SkipBuild
 # 仅在开发时：编译测试并运行单入口/关闭释放短验证
 ./scripts/build.ps1 -Test
-# 显式选择：项目驱动已安装且没有活动映射时，短测虚拟屏后端
+# 显式选择：已安装项目驱动、已解锁本地桌面且没有活动映射时，短测完整集成
 ./scripts/build.ps1 -Test -VirtualDisplayTests
 ```
 
@@ -30,4 +30,4 @@ C++20 / MSVC / CMake / x86 / 静态 CRT；WGC + D3D11、D2D/DirectWrite、WIC。
 - [接口约定](docs/API_SPEC.md)
 - [架构](docs/ARCHITECTURE.md)
 - [范围](docs/SCOPE.md)
-- [交互原型（本次新增交互待审批）](docs/design/PROTOTYPE.html)
+- [已批准交互原型](docs/design/PROTOTYPE.html)

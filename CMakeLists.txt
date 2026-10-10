@@ -21,7 +21,7 @@ if(GWM_BUILD_HELPER)
     message(FATAL_ERROR "gwm_recovery requires a native AMD64 build: use the x64-helper preset.")
   endif()
   add_executable(gwm_recovery
-    src/virtual/helper_main.cpp src/virtual/broker.cpp src/virtual/protocol.cpp
+    src/virtual/helper_main.cpp src/virtual/broker.cpp src/virtual/protocol.cpp src/virtual/recovery_prompt.cpp
     src/virtual/window_parking.cpp src/virtual/display_manager.cpp resources/test_host.rc)
   target_include_directories(gwm_recovery PRIVATE src resources)
   target_link_options(gwm_recovery PRIVATE /MANIFEST:NO)
@@ -29,6 +29,17 @@ if(GWM_BUILD_HELPER)
   add_executable(driver_probe tests/driver_probe.cpp src/virtual/display_manager.cpp)
   target_include_directories(driver_probe PRIVATE src)
   target_link_libraries(driver_probe PRIVATE setupapi newdev cfgmgr32 shell32 ole32 advapi32 bcrypt wintrust user32 uuid)
+  enable_testing()
+  add_executable(recovery_prompt_tests tests/recovery_prompt_tests.cpp src/virtual/recovery_prompt.cpp resources/test_host.rc)
+  target_include_directories(recovery_prompt_tests PRIVATE src resources)
+  target_link_options(recovery_prompt_tests PRIVATE /MANIFEST:NO)
+  target_link_libraries(recovery_prompt_tests PRIVATE user32 gdi32)
+  add_test(NAME recovery_prompt COMMAND recovery_prompt_tests)
+  add_executable(request_cache_tests tests/request_cache_tests.cpp src/virtual/broker.cpp src/virtual/protocol.cpp
+    src/virtual/window_parking.cpp src/virtual/display_manager.cpp src/virtual/recovery_prompt.cpp)
+  target_include_directories(request_cache_tests PRIVATE src)
+  target_link_libraries(request_cache_tests PRIVATE user32 gdi32 advapi32 ole32 shcore shell32 setupapi newdev cfgmgr32 bcrypt wintrust uuid)
+  add_test(NAME request_cache COMMAND request_cache_tests)
 endif()
 if(GWM_BUILD_DLL)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -63,7 +74,7 @@ if(GWM_BUILD_DLL)
   set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/payload.rc" PROPERTY OBJECT_DEPENDS
     "${GWM_HELPER_EXE};${GWM_VENDOR_DIR}/MttVDD.inf;${GWM_VENDOR_DIR}/MttVDD.dll;${GWM_VENDOR_DIR}/mttvdd.cat;${CMAKE_CURRENT_SOURCE_DIR}/third_party/VirtualDisplayDriver/LICENSE.txt")
   add_library(GameWindowMapper SHARED src/exports.cpp src/engine.cpp src/capture.cpp src/graphics.cpp
-    src/virtual/payload.cpp src/virtual/client.cpp src/virtual/protocol.cpp
+    src/virtual/payload.cpp src/virtual/client.cpp src/virtual/protocol.cpp src/virtual/controller.cpp
     resources/mapper.rc resources/exports.def "${CMAKE_CURRENT_BINARY_DIR}/generated/payload.rc")
   target_compile_definitions(GameWindowMapper PRIVATE GWM_BUILD)
   target_include_directories(GameWindowMapper PUBLIC include PRIVATE src resources "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -94,7 +105,7 @@ if(GWM_BUILD_TESTS)
     target_link_libraries(gpu_geometry_tests PRIVATE ${GWM_WINDOWS_LIBS})
     add_test(NAME gpu_geometry COMMAND gpu_geometry_tests)
     add_executable(virtual_capture_tests tests/virtual_capture_tests.cpp src/capture.cpp src/graphics.cpp
-      src/virtual/display_manager.cpp src/virtual/window_parking.cpp)
+      src/virtual/display_manager.cpp src/virtual/window_parking.cpp src/virtual/protocol.cpp)
     target_include_directories(virtual_capture_tests PRIVATE src include)
     target_link_libraries(virtual_capture_tests PRIVATE ${GWM_WINDOWS_LIBS}
       setupapi newdev cfgmgr32 shell32 advapi32 bcrypt wintrust uuid)
@@ -104,10 +115,17 @@ if(GWM_BUILD_TESTS)
     target_link_libraries(recovery_integration_tests PRIVATE user32 gdi32 shcore shell32 ole32
       setupapi newdev cfgmgr32 advapi32 bcrypt wintrust uuid)
     add_dependencies(recovery_integration_tests GameWindowMapper)
+    add_executable(canvas_virtual_tests tests/canvas_virtual_tests.cpp src/capture.cpp src/graphics.cpp
+      src/virtual/client.cpp src/virtual/payload.cpp src/virtual/protocol.cpp src/virtual/display_manager.cpp)
+    target_include_directories(canvas_virtual_tests PRIVATE src include "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_link_libraries(canvas_virtual_tests PRIVATE ${GWM_WINDOWS_LIBS}
+      setupapi newdev cfgmgr32 shell32 advapi32 bcrypt wintrust uuid)
+    add_dependencies(canvas_virtual_tests GameWindowMapper)
     if(GWM_ENABLE_DISPLAY_TESTS)
       add_test(NAME virtual_capture COMMAND virtual_capture_tests)
       add_test(NAME recovery_integration COMMAND recovery_integration_tests "$<TARGET_FILE:GameWindowMapper>")
-      set_tests_properties(virtual_capture recovery_integration PROPERTIES RUN_SERIAL TRUE TIMEOUT 90 SKIP_RETURN_CODE 77)
+      add_test(NAME canvas_virtual COMMAND canvas_virtual_tests "$<TARGET_FILE:GameWindowMapper>")
+      set_tests_properties(virtual_capture recovery_integration canvas_virtual PROPERTIES RUN_SERIAL TRUE TIMEOUT 90 SKIP_RETURN_CODE 77)
     endif()
     add_executable(capture_geometry_tests tests/capture_geometry_tests.cpp src/capture.cpp src/graphics.cpp)
     target_include_directories(capture_geometry_tests PRIVATE src include)

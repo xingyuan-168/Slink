@@ -1,9 +1,9 @@
 # Frontend Gate — REQ-GWM-002
 
 scope: gwm-virtual-display-v1
-status: pending
+status: approved
 
-2026-10-09：新增右键隐藏/显示、驱动初始化、关闭恢复与恢复失败重试的原型和UI规范已更新，等待用户明确审批。实施计划批准不等于新原型批准；未记录本次 approved，正式前端尚未开始。
+2026-10-10：用户明确回复“批准新版原型，继续实现”，同时选择“先接入正式 DLL，再由我验收”。新增右键隐藏/显示、驱动初始化、关闭恢复/失败重试及拉伸铺满已批准。approval_record 已记录本 scope；Frontend Gate 允许后进入正式画布实现。
 
 ## 历史审批 REQ-GWM-001 / gwm-wall-v1
 

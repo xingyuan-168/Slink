@@ -4,6 +4,7 @@
 #include "virtual/display_manager.h"
 #include "virtual/window_parking.h"
 #include "virtual_test_source.h"
+#include "virtual_test_guard.h"
 #include <cstdio>
 #include <set>
 
@@ -51,6 +52,7 @@ void updates(gwm::Graphics& graphics, gwm::Capture& capture, const char* stage) 
 }
 }
 int wmain() {
+    if(!gwm::test::waitForUnusedDisplay())return 77;
     const auto previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     HWND surface{};

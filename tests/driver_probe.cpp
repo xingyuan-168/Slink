@@ -41,6 +41,13 @@ bool Number(const wchar_t* text, int& value) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if(argc==2&&wcscmp(argv[1],L"--desktop")==0){
+        SetLastError(ERROR_SUCCESS);HDESK desktop=OpenInputDesktop(0,FALSE,DESKTOP_READOBJECTS);
+        const DWORD error=desktop?ERROR_SUCCESS:GetLastError();wchar_t name[256]{};DWORD bytes{};
+        if(desktop){GetUserObjectInformationW(desktop,UOI_NAME,name,sizeof(name),&bytes);CloseDesktop(desktop);}
+        DWORD session{};ProcessIdToSessionId(GetCurrentProcessId(),&session);
+        std::cout<<"{\"sessionId\":"<<session<<",\"inputDesktopError\":"<<error<<",\"inputDesktop\":"<<Json(name)<<",\"remoteSession\":"<<(GetSystemMetrics(SM_REMOTESESSION)?"true":"false")<<"}\n";return int(error);
+    }
     const auto phase = [](gwm::vd::Phase current, const std::wstring& text) {
         std::cerr << "phase=" << static_cast<int>(current) << ' ' << Utf8(text) << '\n';
     };

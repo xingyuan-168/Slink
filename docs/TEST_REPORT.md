@@ -1,8 +1,29 @@
 # 测试报告 — GameWindowMapper
 
+## 2026-10-10 正式画布集成（待完成桌面验证）
+
+用户已明确批准 gwm-virtual-display-v1 新版原型，Frontend Gate 允许；用户选择正式 DLL 接入后再验收大漠。Engine 已接入控制线程、右键隐藏／显示、重复 HWND 标记、驱动初始化卡片、重新检查、关闭前恢复与失败重试，辅助程序补齐宿主退出后的恢复失败提示。原 14 参数、唯一导出与配置版本1保持不变。
+
+最新构建成功，dumpbin 验证只有一个 WM_StartMapping 导出、依赖均为系统 DLL，未引入动态 MSVC CRT。异步请求修改为内部协议 v3：每次操作带 requestId，IO_PENDING 重试复用并缓存完成结果，入队即忙碌。当前版本尚不能标为全部验收通过：最后真实窗口轮次遇到输入桌面访问错误5，SetDisplayConfig 同样拒绝访问，正在等待用户回到普通桌面。
+
+已将候选构建打包到 output，仅更新 GameWindowMapper.dll（1,042,432字节）和使用说明.md（明确标注验收待完成）。DLL SHA256：`183CEAED670070FDDEDEFDB4BA318C488FCCBB1098924EBBEA6000D33969B1CB`。打包后哈希与构建一致，内嵌辅助程序哈希与最终生成头一致；用户 demo.e、黑_1.jpg、dll说明文档.txt 的哈希均与打包前相同，没有添加独立辅助EXE或驱动附件到交付目录。
+
+| 检查 | 实际状态 |
+|---|---|
+| 请求去重 | request_cache 13 项、3.50 秒通过；隔离管道、假显示操作，强制350ms工作超过250ms回复预算；确认同编号重放只执行一次、不同内容拒绝、新编号可重新执行；不改真实显示配置 |
+| 恢复提示 | recovery_prompt 0.55 秒通过；显示、重试按钮、关闭仅最小化、恢复后隐藏及销毁；未制造真实用户窗口恢复失败 |
+| GPU 铺满 | 集成修订期间 gpu_geometry 最新0.17秒通过；拉伸/四边/偏移/越界，生产不逐帧CPU处理 |
+| 真实窗口后端 | 前一轮 virtual_capture 3.80秒、recovery_integration 5.55秒通过；以下后端阶段保留详细记录，不冒充最新协议的最终完整验收 |
+| 原生画布 | 已实际观察并检查菜单隐藏、重复格显示、隐藏期间正式画布持续收帧、双击恢复、路径丢失与按钮重新检查；后续三窗口记录／关闭重开出现异步排队边界失败，已修订请求去重和入队控制，须在普通桌面复验 |
+| 最后真实窗口轮次 | 失败，未计为通过。driver_probe --desktop：sessionId=1、inputDesktopError=5、remoteSession=false；--inspect 显示设备已安装且无活动路径，--extend 在 SetDisplayConfig 返回5；未改系统安全策略 |
+| 未实测 | 当前最终版本完整三窗口启闭、取消UAC、需要重启、真实恢复失败、其他DPI/实体屏断开、Windows10；易语言／大漠／真实游戏由用户验收 |
+| 资产与清理 | input和既有删除未动；用户output中的.e、图片及额外说明保留。任务标记确认临时文件归属后，清理被 CLEANUP_TARGET_UNSAFE 拒绝（out不在允许根）；不换路径或工具删除。两个已合并工作树仍因尚未并入main被治理拒绝清理，继续保留 |
+
+当前正式集成的 Finish 尚未通过。最近 run_id=05f88698-3c47-4dcb-b2dc-8ee89cc90744，仍使用起点0c1659d，execution_status=completed、allowed=false，仅 TEST_COMMAND_FAILED 阻断；脚本在本地 Default 输入桌面预检时停止，未运行后续窗口／显示检查。期间修复 Windows PowerShell5 以控制台编码误解码 UTF-8 探针 JSON 的构建脚本问题。回到普通桌面后运行 scripts/build.ps1 -Test -VirtualDisplayTests，记录真实结果，再完成最终交接；不得将此前后端 Finish 或原型演示视为本版全部通过。
+
 ## 2026-10-10 REQ-GWM-002 后端阶段（尚未正式交付）
 
-当前 output 仍为原交付文件。下面结果来自本轮源码、x86 Release DLL 内嵌资源及 x64 恢复辅助程序，不能代表新增画布菜单、易语言隐藏功能或大漠绑定已经验收。新增原型审批与大漠用户验收待完成，Engine 交互接入和最终 Finish 尚未完成。
+以下为正式画布接入前的阶段快照，当时 output 仍为原交付，新增原型尚待审批。结果来自当时源码、x86 Release DLL 内嵌资源及 x64 恢复辅助程序，不能代表本页最新版本的画布菜单、易语言隐藏功能或大漠绑定已全部验收。
 
 | 项目 | 本轮实际结果 |
 |---|---|

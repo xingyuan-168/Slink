@@ -810,7 +810,9 @@ DisplayResult EnsureExtendedDisplay(int minWidth, int minHeight, const PhaseCall
         }
         if (applied) break;
     }
-    if (!applied) return Failure(lastError, L"无法在保留现有显示器设置的同时连接所需虚拟屏模式");
+    if (!applied) return Failure(lastError,lastError==ERROR_ACCESS_DENIED?
+        L"Windows 当前不允许修改显示配置，请解锁或回到本地普通桌面后重新检查":
+        L"无法在保留现有显示器设置的同时连接所需虚拟屏模式");
     Topology current;
     if (const DWORD error = QueryTopology(QDC_ONLY_ACTIVE_PATHS, current)) return Failure(error, L"虚拟屏连接后读取显示配置失败");
     for (const auto& path : current.paths) {

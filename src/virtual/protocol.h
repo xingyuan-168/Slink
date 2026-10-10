@@ -8,7 +8,7 @@
 // A broker is shared by hosts in the same interactive logon, never by PID alone.
 namespace gwm::vd::ipc {
 inline constexpr uint32_t Magic = 0x47574d56;
-inline constexpr uint32_t Version = 2;
+inline constexpr uint32_t Version = 3;
 inline constexpr size_t MaxWindows = 64;
 inline constexpr size_t MessageChars = 512;
 inline constexpr uint32_t ReplyAcknowledged = 0x47574d41;
@@ -27,6 +27,7 @@ struct Request {
     uint32_t processId{}; // Must equal GetNamedPipeClientProcessId, authenticated by the broker.
     uint32_t count{};
     uint64_t window{};
+    uint64_t requestId{}; // Stable across polling retries of one mutation.
     uint64_t windows[MaxWindows]{}; // Register whitelist, copied once from the startup HWND array.
 };
 struct Reply {
@@ -46,7 +47,7 @@ struct Reply {
 };
 #pragma pack(pop)
 static_assert(sizeof(wchar_t) == 2);
-static_assert(sizeof(Request) == 540);
+static_assert(sizeof(Request) == 548);
 static_assert(sizeof(Reply) == 1592);
 
 // Restricted namespace derives from the current logon SID + Windows session ID.

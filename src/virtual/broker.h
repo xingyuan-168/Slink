@@ -19,6 +19,7 @@ struct BrokerOptions {
     HANDLE stopEvent{};
     DWORD startupIdleMs{15000};
     DWORD finalReplyGraceMs{2000};
+    DWORD testOperationDelayMs{}; // In-process tests only; not a helper CLI option.
 };
 
 // Both entry points run in the native x64 helper, not inside the x86 DLL.

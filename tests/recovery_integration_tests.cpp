@@ -3,6 +3,7 @@
 #include "virtual/client.h"
 #include "virtual/display_manager.h"
 #include "virtual_test_source.h"
+#include "virtual_test_guard.h"
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -103,7 +104,8 @@ int manualParking(const wchar_t* dll, const wchar_t* handleText) {
 }
 HANDLE brokerProcess() {
     const auto name = gwm::vd::ipc::BrokerPipeName();
-    Handle pipe{CreateFileW(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr)};
+    Handle pipe;
+    if(!waitFor([&]{pipe.value=CreateFileW(name.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);return pipe.value!=INVALID_HANDLE_VALUE;},3000))return nullptr;
     ULONG pid{};
     if (pipe.value == INVALID_HANDLE_VALUE || !GetNamedPipeServerProcessId(pipe.value, &pid)) return nullptr;
     return OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -115,13 +117,7 @@ int wmain(int argc, wchar_t** argv) {
     if (argc == 4 && wcscmp(argv[1], L"--park") == 0) return manualParking(argv[2], argv[3]);
     if (argc != 2) { std::puts("usage: recovery_integration_tests <DLL with embedded helper>"); return 2; }
     // Refuse to interfere with any already running mapping or active own path.
-    if (WaitNamedPipeW(gwm::vd::ipc::BrokerPipeName().c_str(), 0) || GetLastError() != ERROR_FILE_NOT_FOUND) {
-        std::puts("SKIP: an existing recovery broker must be left untouched"); return 77;
-    }
-    const auto before = gwm::vd::InspectOwnedDisplay();
-    if (!before || !before.installed || before.active) {
-        std::puts("SKIP: requires the installed own driver with no active own path"); return 77;
-    }
+    if(!gwm::test::waitForUnusedDisplay())return 77;
     const auto dpi = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     Module module(argv[1]);
     gwm::vd::RecoveryClient client;
