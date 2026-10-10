@@ -51,5 +51,6 @@ static_assert(sizeof(Reply) == 1588);
 // These names contain no caller-controlled path or arbitrary command line.
 std::wstring BrokerPipeName();
 std::wstring BrokerMutexName();
+std::wstring CurrentLogonSid();
 std::wstring RuntimeDirectory(); // Per-user %LocalAppData%\GameWindowMapper\Runtime\v1
 }
