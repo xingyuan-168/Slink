@@ -1,6 +1,10 @@
 # Open Source Research
 
-## Requirement
+## 当前复用决策（2026-10-26）
+
+当前版本回到 REQ-GWM-001 的自建轻量 WGC/D3D11 DLL，保留 GPU 拉伸铺满。用户撤回 REQ-GWM-002；VirtualDrivers 驱动、恢复辅助程序及其许可负载均不再编译、嵌入或分发。本次为既有实现回退，不引入新技术或第三方依赖。以下 REQ-GWM-002 调研、签名核验与本机试验结论仅保留为历史，不代表当前组件清单。
+
+## Requirement（REQ-GWM-002 历史，已撤回）
 
 requirement_id: REQ-GWM-002
 summary: 保留单命令屏幕墙，在签名虚拟扩展屏中停放源窗口，并在关闭或宿主退出时恢复。

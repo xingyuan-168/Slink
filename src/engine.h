@@ -1,6 +1,5 @@
 #pragma once
 #include "model.h"
-#include "virtual/controller.h"
 #include <condition_variable>
 #include <thread>
 
@@ -26,17 +25,6 @@ private:
     void uiMain() noexcept;
     void renderMain() noexcept;
     void requestStop() noexcept;
-    Hit targetAt(int,int);
-    void activateWindow(uint64_t);
-    void contextMenu(int,int);
-    void command(UINT);
-    void updateStatusControls();
-    void closeCanvas();
-    vd::CanvasController controller;
-    HWND retryButton=nullptr;
-    Hit contextTarget{};
-    std::atomic<bool> controllerStarted{false};
-    std::atomic<bool> animateProgress{true};
     std::mutex configMutex;
     Config config;
     std::vector<Hit> hits;
